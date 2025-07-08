@@ -36,8 +36,8 @@ double quadblas_qnrm2(int n, void* x, int incx) {
 }
 
 // QAXPY: y := alpha*x + y
-void quadblas_qaxpy(int n, double alpha, const void* x, int incx, void* y, int incy) {
-    const Sleef_quad* qx = static_cast<const Sleef_quad*>(x);
+void quadblas_qaxpy(int n, double alpha, void* x, int incx, void* y, int incy) {
+    Sleef_quad* qx = static_cast<Sleef_quad*>(x);
     Sleef_quad* qy = static_cast<Sleef_quad*>(y);
     Sleef_quad qalpha = Sleef_cast_from_doubleq1(alpha);
     
@@ -96,11 +96,11 @@ void quadblas_qgemv(char layout, char trans, int m, int n, double alpha,
 
 // QGEMM: matrix-matrix multiplication
 void quadblas_qgemm(char layout, char transa, char transb, int m, int n, int k,
-                   double alpha, const void* A, int lda, const void* B, int ldb,
+                   double alpha, void* A, int lda, void* B, int ldb,
                    double beta, void* C, int ldc) {
     
-    const Sleef_quad* qA = static_cast<const Sleef_quad*>(A);
-    const Sleef_quad* qB = static_cast<const Sleef_quad*>(B);
+    Sleef_quad* qA = static_cast<Sleef_quad*>(A);
+    Sleef_quad* qB = static_cast<Sleef_quad*>(B);
     Sleef_quad* qC = static_cast<Sleef_quad*>(C);
     
     Sleef_quad qalpha = Sleef_cast_from_doubleq1(alpha);
@@ -144,7 +144,7 @@ const char* quadblas_get_version(void) {
 }
 
 // Memory alignment check
-int quadblas_is_aligned(const void* ptr) {
+int quadblas_is_aligned(void* ptr) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
     return (addr % QuadBLAS::ALIGNMENT) == 0;
 }
@@ -158,7 +158,7 @@ int quadblas_is_aligned(const void* ptr) {
 namespace QuadBLAS {
 
 // Simple vector class for convenience
-template<Layout layout = Layout::RowMajor>
+template<Layout layout>
 class Vector {
 private:
     Sleef_quad* data_;
@@ -193,12 +193,12 @@ public:
     Vector& operator=(const Vector&) = delete;
     
     Sleef_quad& operator[](size_t i) { return data_[i * stride_]; }
-    const Sleef_quad& operator[](size_t i) const { return data_[i * stride_]; }
+    Sleef_quad& operator[](size_t i) const { return data_[i * stride_]; }
     
     size_t size() const { return size_; }
     size_t stride() const { return stride_; }
     Sleef_quad* data() { return data_; }
-    const Sleef_quad* data() const { return data_; }
+    Sleef_quad* data() const { return data_; }
     
     // Dot product
     Sleef_quad dot(const Vector& other) const {
@@ -219,7 +219,7 @@ public:
 };
 
 // Simple matrix class for convenience
-template<Layout layout = Layout::RowMajor>
+template<Layout layout>
 class Matrix {
 private:
     Sleef_quad* data_;
@@ -259,7 +259,7 @@ public:
         return layout == Layout::RowMajor ? data_[i * ld_ + j] : data_[j * ld_ + i];
     }
     
-    const Sleef_quad& operator()(size_t i, size_t j) const {
+    Sleef_quad& operator()(size_t i, size_t j) const {
         return layout == Layout::RowMajor ? data_[i * ld_ + j] : data_[j * ld_ + i];
     }
     
@@ -267,7 +267,7 @@ public:
     size_t cols() const { return cols_; }
     size_t leading_dimension() const { return ld_; }
     Sleef_quad* data() { return data_; }
-    const Sleef_quad* data() const { return data_; }
+    Sleef_quad* data() const { return data_; }
     
     // Matrix-vector multiplication
     void gemv(Sleef_quad alpha, const Vector<layout>& x, Sleef_quad beta, Vector<layout>& y) const {
@@ -276,11 +276,24 @@ public:
     }
     
     // Matrix-matrix multiplication
-    void gemm(Sleef_quad alpha, const Matrix& B, Sleef_quad beta, Matrix& C) const {
+    void gemm(Sleef_quad alpha, Matrix& B, Sleef_quad beta, Matrix& C) const {
         QuadBLAS::gemm(layout, rows_, B.cols(), cols_, alpha, data_, ld_,
                       B.data(), B.leading_dimension(), beta, C.data(), C.leading_dimension());
     }
 };
+
+// Convenient type aliases with default template arguments
+using VectorRowMajor = Vector<Layout::RowMajor>;
+using VectorColMajor = Vector<Layout::ColMajor>;
+using MatrixRowMajor = Matrix<Layout::RowMajor>;
+using MatrixColMajor = Matrix<Layout::ColMajor>;
+
+// Default to row major
+template<Layout layout = Layout::RowMajor>
+using DefaultVector = Vector<layout>;
+
+template<Layout layout = Layout::RowMajor>  
+using DefaultMatrix = Matrix<layout>;
 
 } // namespace QuadBLAS
 

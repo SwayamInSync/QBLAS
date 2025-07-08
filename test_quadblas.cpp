@@ -36,7 +36,7 @@ void test_dot_product() {
     std::cout << "\n=== Testing Vector Dot Product ===\n";
     
     const size_t n = 10000;
-    QuadBLAS::Vector<> x(n), y(n);
+    QuadBLAS::DefaultVector<> x(n), y(n);
     
     // Initialize with simple values
     for (size_t i = 0; i < n; ++i) {
@@ -69,8 +69,8 @@ void test_matrix_vector() {
     std::cout << "\n=== Testing Matrix-Vector Multiplication ===\n";
     
     const size_t m = 1000, n = 1000;
-    QuadBLAS::Matrix<> A(m, n);
-    QuadBLAS::Vector<> x(n), y(m);
+    QuadBLAS::DefaultMatrix<> A(m, n);
+    QuadBLAS::DefaultVector<> x(n), y(m);
     
     // Initialize matrix A as identity matrix + small perturbation
     for (size_t i = 0; i < m; ++i) {
@@ -102,7 +102,7 @@ void test_matrix_vector() {
     std::cout << "Time: " << std::fixed << std::setprecision(3) << time_ms << " ms" << std::endl;
     
     // Test C interface
-    QuadBLAS::Vector<> y2(m);
+    QuadBLAS::DefaultVector<> y2(m);
     quadblas_qgemv('R', 'N', static_cast<int>(m), static_cast<int>(n), 1.0,
                    A.data(), static_cast<int>(A.leading_dimension()),
                    x.data(), 1, 0.0, y2.data(), 1);
@@ -119,7 +119,7 @@ void test_matrix_matrix() {
     std::cout << "\n=== Testing Matrix-Matrix Multiplication ===\n";
     
     const size_t m = 500, n = 500, k = 500;
-    QuadBLAS::Matrix<> A(m, k), B(k, n), C(m, n);
+    QuadBLAS::DefaultMatrix<> A(m, k), B(k, n), C(m, n);
     
     // Initialize matrices
     std::random_device rd;
@@ -158,7 +158,7 @@ void test_matrix_matrix() {
     std::cout << std::endl;
     
     // Test C interface
-    QuadBLAS::Matrix<> C2(m, n);
+    QuadBLAS::DefaultMatrix<> C2(m, n);
     timer.start();
     quadblas_qgemm('R', 'N', 'N', static_cast<int>(m), static_cast<int>(n), static_cast<int>(k),
                    1.0, A.data(), static_cast<int>(A.leading_dimension()),
@@ -174,7 +174,7 @@ void performance_comparison() {
     std::cout << "\n=== Performance Scaling Test ===\n";
     
     const size_t n = 5000;
-    QuadBLAS::Vector<> x(n), y(n);
+    QuadBLAS::DefaultVector<> x(n), y(n);
     
     // Initialize vectors
     for (size_t i = 0; i < n; ++i) {
@@ -216,7 +216,7 @@ void test_precision() {
     
     // Test with values that would lose precision in double
     const size_t n = 3;
-    QuadBLAS::Vector<> x(n), y(n);
+    QuadBLAS::DefaultVector<> x(n), y(n);
     
     // Use values that demonstrate quad precision advantage
     x[0] = from_double(1e20);
@@ -243,6 +243,34 @@ void test_precision() {
     std::cout << "e (quad): " << std::setprecision(30) << to_double(SLEEF_M_Eq) << std::endl;
 }
 
+// Simple test to verify basic functionality
+void test_basic() {
+    std::cout << "\n=== Basic Functionality Test ===\n";
+    
+    // Test simple dot product
+    const size_t n = 5;
+    QuadBLAS::DefaultVector<> x(n), y(n);
+    
+    for (size_t i = 0; i < n; ++i) {
+        x[i] = from_double(i + 1);  // 1, 2, 3, 4, 5
+        y[i] = from_double(1.0);    // 1, 1, 1, 1, 1
+    }
+    
+    Sleef_quad result = x.dot(y);
+    double expected = 1 + 2 + 3 + 4 + 5;  // = 15
+    
+    std::cout << "Simple dot product test:" << std::endl;
+    std::cout << "Result: " << to_double(result) << std::endl;
+    std::cout << "Expected: " << expected << std::endl;
+    std::cout << "Error: " << std::abs(to_double(result) - expected) << std::endl;
+    
+    if (std::abs(to_double(result) - expected) < 1e-10) {
+        std::cout << "✓ PASS" << std::endl;
+    } else {
+        std::cout << "✗ FAIL" << std::endl;
+    }
+}
+
 // Main test function
 int main() {
     std::cout << "=== QuadBLAS Test Suite ===\n";
@@ -265,6 +293,7 @@ int main() {
 #endif
     
     try {
+        test_basic();
         test_dot_product();
         test_matrix_vector();
         test_matrix_matrix();

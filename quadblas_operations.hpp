@@ -20,7 +20,7 @@ inline Sleef_quad dot_kernel_vectorized(Sleef_quad* x, Sleef_quad* y, size_t n) 
     for (size_t i = 0; i < vec_n; ++i) {
         QuadVector x_vec = QuadVector::load(&x[i * VECTOR_SIZE]);
         QuadVector y_vec = QuadVector::load(&y[i * VECTOR_SIZE]);
-        sum_vec = sum_vec.fma(x_vec, y_vec);
+        sum_vec = x_vec.fma(y_vec, sum_vec);  // x*y + sum
     }
     
     Sleef_quad result = sum_vec.horizontal_sum();
@@ -136,8 +136,8 @@ inline void gemv_row_major(size_t m, size_t n, Sleef_quad alpha,
 
 // Column-major implementation
 inline void gemv_col_major(size_t m, size_t n, Sleef_quad alpha,
-                          const Sleef_quad* A, size_t lda,
-                          const Sleef_quad* x, size_t incx,
+                          Sleef_quad* A, size_t lda,
+                          Sleef_quad* x, size_t incx,
                           Sleef_quad beta, Sleef_quad* y, size_t incy) {
     
     if (m == 0 || n == 0) return;
@@ -150,7 +150,7 @@ inline void gemv_col_major(size_t m, size_t n, Sleef_quad alpha,
     // Add alpha * A * x
     for (size_t j = 0; j < n; ++j) {
         Sleef_quad x_j = Sleef_mulq1_u05(alpha, x[j * incx]);
-        const Sleef_quad* col = &A[j * lda];
+        Sleef_quad* col = &A[j * lda];
         
 #ifdef _OPENMP
         #pragma omp parallel for if(m >= PARALLEL_THRESHOLD)
@@ -201,7 +201,7 @@ inline void gemm_micro_kernel(size_t mr, size_t nr, size_t kc,
             
             for (size_t j = 0; j < nr/VECTOR_SIZE; ++j) {
                 QuadVector b_vec = QuadVector::load(&B[k * nr + j * VECTOR_SIZE]);
-                c_vec[i][j] = c_vec[i][j].fma(a_vec, b_vec);
+                c_vec[i][j] = a_vec.fma(b_vec, c_vec[i][j]);  // a*b + c
             }
         }
     }
@@ -245,8 +245,8 @@ inline void gemm_macro_kernel(size_t mc, size_t nc, size_t kc,
 // Main GEMM function: C = alpha * A * B + beta * C
 inline void gemm(Layout layout, size_t m, size_t n, size_t k,
                 Sleef_quad alpha,
-                const Sleef_quad* A, size_t lda,
-                const Sleef_quad* B, size_t ldb,
+                Sleef_quad* A, size_t lda,
+                Sleef_quad* B, size_t ldb,
                 Sleef_quad beta, Sleef_quad* C, size_t ldc) {
     
     if (m == 0 || n == 0 || k == 0) return;

@@ -18,8 +18,9 @@ endif()
 # Find OpenMP
 find_package(OpenMP)
 
-# Create executable
+# Create executables
 add_executable(quadblas_test test_quadblas.cpp)
+add_executable(quadblas_benchmark benchmark.cpp)
 
 # Set C++ standard
 target_compile_features(quadblas_test PRIVATE cxx_std_17)
@@ -40,7 +41,7 @@ target_link_directories(quadblas_test PRIVATE ${SLEEF_LIB_DIR})
 target_link_libraries(quadblas_test 
     sleef
     sleefquad
-    tlfloat
+    # tlfloat
     $<$<TARGET_EXISTS:OpenMP::OpenMP_CXX>:OpenMP::OpenMP_CXX>
     $<$<CONFIG:DEBUG>:-fsanitize=address>
 )
