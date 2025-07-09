@@ -18,4 +18,9 @@
 // SLEEF includes
 #include <sleefquad.h>
 
+// Compatibility for SLEEF_QUAD_C macro
+#ifndef SLEEF_QUAD_C
+    #define SLEEF_QUAD_C(x) Sleef_cast_from_doubleq1(x)
+#endif
+
 #endif // QUADBLAS_CORE_PLATFORM_HPP
