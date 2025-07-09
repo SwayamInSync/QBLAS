@@ -88,6 +88,36 @@ namespace QuadBLAS
     }
   }
 
+  // Simple GEMM implementation for small matrices
+  inline void gemm_simple(Layout layout, size_t m, size_t n, size_t k,
+                          Sleef_quad alpha,
+                          Sleef_quad *A, size_t lda,
+                          Sleef_quad *B, size_t ldb,
+                          Sleef_quad beta, Sleef_quad *C, size_t ldc)
+  {
+    // Simple triple loop - guaranteed to work correctly
+#ifdef _OPENMP
+#pragma omp parallel for collapse(2) if (m * n >= PARALLEL_THRESHOLD)
+#endif
+    for (size_t i = 0; i < m; ++i)
+    {
+      for (size_t j = 0; j < n; ++j)
+      {
+        Sleef_quad sum = SLEEF_QUAD_C(0.0);
+
+        for (size_t l = 0; l < k; ++l)
+        {
+          size_t a_idx = (layout == Layout::RowMajor) ? i * lda + l : l * lda + i;
+          size_t b_idx = (layout == Layout::RowMajor) ? l * ldb + j : j * ldb + l;
+          sum = Sleef_fmaq1_u05(A[a_idx], B[b_idx], sum);
+        }
+
+        size_t c_idx = (layout == Layout::RowMajor) ? i * ldc + j : j * ldc + i;
+        C[c_idx] = Sleef_fmaq1_u05(alpha, sum, Sleef_mulq1_u05(beta, C[c_idx]));
+      }
+    }
+  }
+
   // Main GEMM function: C = alpha * A * B + beta * C
   inline void gemm(Layout layout, size_t m, size_t n, size_t k,
                    Sleef_quad alpha,
@@ -98,6 +128,15 @@ namespace QuadBLAS
 
     if (m == 0 || n == 0 || k == 0)
       return;
+
+    // Use simple implementation for small matrices to avoid micro-kernel issues
+    // The blocked algorithm is optimized for larger matrices
+    constexpr size_t SMALL_MATRIX_THRESHOLD = 32;
+    if (m <= SMALL_MATRIX_THRESHOLD && n <= SMALL_MATRIX_THRESHOLD && k <= SMALL_MATRIX_THRESHOLD)
+    {
+      gemm_simple(layout, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+      return;
+    }
 
     BlockingParams params(m, n, k);
 
@@ -110,28 +149,7 @@ namespace QuadBLAS
       // Fallback to simple implementation if allocation fails
       aligned_free(A_packed);
       aligned_free(B_packed);
-
-      // Simple triple loop with OpenMP parallelization
-#ifdef _OPENMP
-#pragma omp parallel for collapse(2) if (m * n >= PARALLEL_THRESHOLD)
-#endif
-      for (size_t i = 0; i < m; ++i)
-      {
-        for (size_t j = 0; j < n; ++j)
-        {
-          Sleef_quad sum = SLEEF_QUAD_C(0.0);
-
-          for (size_t l = 0; l < k; ++l)
-          {
-            size_t a_idx = (layout == Layout::RowMajor) ? i * lda + l : l * lda + i;
-            size_t b_idx = (layout == Layout::RowMajor) ? l * ldb + j : j * ldb + l;
-            sum = Sleef_fmaq1_u05(A[a_idx], B[b_idx], sum);
-          }
-
-          size_t c_idx = (layout == Layout::RowMajor) ? i * ldc + j : j * ldc + i;
-          C[c_idx] = Sleef_fmaq1_u05(alpha, sum, Sleef_mulq1_u05(beta, C[c_idx]));
-        }
-      }
+      gemm_simple(layout, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
       return;
     }
 
