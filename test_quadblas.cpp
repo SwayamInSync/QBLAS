@@ -1,4 +1,4 @@
-#include "quadblas.hpp"
+#include "include/quadblas/quadblas.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
