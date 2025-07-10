@@ -5,6 +5,7 @@
 #include "../core/platform.hpp"
 #include "../simd/quad_vector.hpp"
 #include "../threading/openmp_utils.hpp"
+#include <vector>
 
 namespace QuadBLAS
 {
@@ -47,9 +48,15 @@ namespace QuadBLAS
 #ifdef _OPENMP
     const int num_threads = get_num_threads();
     const size_t chunk_size = n / num_threads;
-    Sleef_quad result = SLEEF_QUAD_C(0.0);
 
-#pragma omp parallel reduction(+ : result)
+    // Use array for partial results since OpenMP reduction doesn't work with struct types
+    std::vector<Sleef_quad> partial_results(num_threads);
+    for (int i = 0; i < num_threads; ++i)
+    {
+      partial_results[i] = SLEEF_QUAD_C(0.0);
+    }
+
+#pragma omp parallel
     {
       int tid = omp_get_thread_num();
       size_t start = tid * chunk_size;
@@ -57,8 +64,15 @@ namespace QuadBLAS
 
       if (start < end)
       {
-        result += dot_kernel_vectorized(&x[start], &y[start], end - start);
+        partial_results[tid] = dot_kernel_vectorized(&x[start], &y[start], end - start);
       }
+    }
+
+    // Combine partial results
+    Sleef_quad result = SLEEF_QUAD_C(0.0);
+    for (int i = 0; i < num_threads; ++i)
+    {
+      result = Sleef_addq1_u05(result, partial_results[i]);
     }
 
     return result;
@@ -86,10 +100,32 @@ namespace QuadBLAS
     if (n >= PARALLEL_THRESHOLD)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : result)
-      for (size_t i = 0; i < n; ++i)
+      const int num_threads = get_num_threads();
+
+      // Use array for partial results
+      std::vector<Sleef_quad> partial_results(num_threads);
+      for (int i = 0; i < num_threads; ++i)
       {
-        result = Sleef_fmaq1_u05(x[i * incx], y[i * incy], result);
+        partial_results[i] = SLEEF_QUAD_C(0.0);
+      }
+
+#pragma omp parallel
+      {
+        int tid = omp_get_thread_num();
+        size_t chunk_size = n / num_threads;
+        size_t start = tid * chunk_size;
+        size_t end = (tid == num_threads - 1) ? n : start + chunk_size;
+
+        for (size_t i = start; i < end; ++i)
+        {
+          partial_results[tid] = Sleef_fmaq1_u05(x[i * incx], y[i * incy], partial_results[tid]);
+        }
+      }
+
+      // Combine partial results
+      for (int i = 0; i < num_threads; ++i)
+      {
+        result = Sleef_addq1_u05(result, partial_results[i]);
       }
 #else
       for (size_t i = 0; i < n; ++i)
