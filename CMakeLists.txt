@@ -1,16 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 project(QuadBLAS)
-
-# Check for custom SLEEF installation via environment variable
 set(SLEEF_CUSTOM_ROOT "$ENV{SLEEF_ROOT}")
 
 if(SLEEF_CUSTOM_ROOT)
-    # Use custom SLEEF installation
     message(STATUS "Using custom SLEEF installation: ${SLEEF_CUSTOM_ROOT}")
     set(SLEEF_INCLUDE_DIR "${SLEEF_CUSTOM_ROOT}/include")
     set(SLEEF_LIB_DIR "${SLEEF_CUSTOM_ROOT}/lib")
-    
-    # Verify paths exist
     if(NOT EXISTS ${SLEEF_INCLUDE_DIR})
         message(FATAL_ERROR "SLEEF include directory not found: ${SLEEF_INCLUDE_DIR}")
     endif()
@@ -19,40 +14,30 @@ if(SLEEF_CUSTOM_ROOT)
     endif()
     
 else()
-    # Use system SLEEF via pkg-config
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SLEEF REQUIRED sleef)
 endif()
-
-# Handle OpenMP on macOS with Apple Clang
 set(OpenMP_FOUND FALSE)
 
 if(APPLE)
-    # Apple Clang doesn't support OpenMP natively, so we configure libomp manually
     message(STATUS "Configuring OpenMP for macOS with Apple Clang...")
-    
-    # Look for libomp in Homebrew locations
     set(HOMEBREW_PREFIXES "/opt/homebrew" "/usr/local")
     
     foreach(PREFIX ${HOMEBREW_PREFIXES})
         set(FOUND_LIBOMP FALSE)
         set(LIBOMP_LIB_PATH "")
         set(LIBOMP_INCLUDE_PATH "")
-        
-        # First try the standard linked locations
         if(EXISTS "${PREFIX}/lib/libomp.dylib" AND EXISTS "${PREFIX}/include/omp.h")
             set(FOUND_LIBOMP TRUE)
             set(LIBOMP_LIB_PATH "${PREFIX}/lib/libomp.dylib")
             set(LIBOMP_INCLUDE_PATH "${PREFIX}/include")
             message(STATUS "Found libomp at: ${PREFIX} (linked)")
-        # Then try the keg-only opt location (recommended by Homebrew)
         elseif(EXISTS "${PREFIX}/opt/libomp/lib/libomp.dylib" AND EXISTS "${PREFIX}/opt/libomp/include/omp.h")
             set(FOUND_LIBOMP TRUE)
             set(LIBOMP_LIB_PATH "${PREFIX}/opt/libomp/lib/libomp.dylib")
             set(LIBOMP_INCLUDE_PATH "${PREFIX}/opt/libomp/include")
             message(STATUS "Found libomp at: ${PREFIX}/opt/libomp (keg-only)")
         else()
-            # Fallback: Look in Cellar directory
             file(GLOB LIBOMP_CELLAR_DIRS "${PREFIX}/Cellar/libomp/*/")
             foreach(CELLAR_DIR ${LIBOMP_CELLAR_DIRS})
                 if(EXISTS "${CELLAR_DIR}/lib/libomp.dylib" AND EXISTS "${CELLAR_DIR}/include/omp.h")
@@ -72,8 +57,6 @@ if(APPLE)
             set(OpenMP_C_LIB_NAMES "omp")
             set(OpenMP_CXX_LIB_NAMES "omp")
             set(OpenMP_omp_LIBRARY "${LIBOMP_LIB_PATH}")
-            
-            # Create imported target for OpenMP
             if(NOT TARGET OpenMP::OpenMP_CXX)
                 add_library(OpenMP::OpenMP_CXX UNKNOWN IMPORTED)
                 set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
@@ -102,19 +85,12 @@ if(APPLE)
         message(WARNING "Building without OpenMP support.")
     endif()
 else()
-    # On non-Apple systems, use the standard FindOpenMP
     find_package(OpenMP)
 endif()
-
-# Create executables
 add_executable(quadblas_test test_quadblas.cpp)
 add_executable(quadblas_benchmark benchmark.cpp)
-
-# Set C++ standard
 target_compile_features(quadblas_test PRIVATE cxx_std_17)
 target_compile_features(quadblas_benchmark PRIVATE cxx_std_17)
-
-# Add compiler flags for optimization
 target_compile_options(quadblas_test PRIVATE 
     -O3 -march=native -ffast-math
     $<$<CONFIG:DEBUG>:-g -fsanitize=address>
@@ -123,8 +99,6 @@ target_compile_options(quadblas_benchmark PRIVATE
     -O3 -march=native -ffast-math
     $<$<CONFIG:DEBUG>:-g -fsanitize=address>
 )
-
-# Include directories
 if(SLEEF_CUSTOM_ROOT)
     target_include_directories(quadblas_test PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
@@ -134,8 +108,6 @@ if(SLEEF_CUSTOM_ROOT)
         ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
         ${SLEEF_INCLUDE_DIR}
     )
-    
-    # Link directories and libraries for custom SLEEF
     target_link_directories(quadblas_test PRIVATE ${SLEEF_LIB_DIR})
     target_link_directories(quadblas_benchmark PRIVATE ${SLEEF_LIB_DIR})
     
@@ -150,7 +122,6 @@ if(SLEEF_CUSTOM_ROOT)
         $<$<CONFIG:DEBUG>:-fsanitize=address>
     )
 else()
-    # Use pkg-config provided paths and libraries
     target_include_directories(quadblas_test PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
         ${SLEEF_INCLUDE_DIRS}
@@ -177,8 +148,6 @@ else()
         $<$<CONFIG:DEBUG>:-fsanitize=address>
     )
 endif()
-
-# Print configuration info
 message(STATUS "SLEEF configuration:")
 if(SLEEF_CUSTOM_ROOT)
     message(STATUS "  Custom installation: ${SLEEF_CUSTOM_ROOT}")
