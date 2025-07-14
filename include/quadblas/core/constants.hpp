@@ -11,7 +11,7 @@ namespace QuadBLAS
   constexpr size_t CACHE_LINE_SIZE = 64;
   constexpr size_t L1_CACHE_SIZE = 32768;
   constexpr size_t L2_CACHE_SIZE = 262144;
-  constexpr size_t PARALLEL_THRESHOLD = 1000;
+  constexpr size_t PARALLEL_THRESHOLD = 500;
   constexpr size_t GEMM_BLOCK_SIZE = 64;
 
   // Memory alignment for SIMD operations

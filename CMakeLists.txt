@@ -24,8 +24,87 @@ else()
     pkg_check_modules(SLEEF REQUIRED sleef)
 endif()
 
-# Find OpenMP
-find_package(OpenMP)
+# Handle OpenMP on macOS with Apple Clang
+set(OpenMP_FOUND FALSE)
+
+if(APPLE)
+    # Apple Clang doesn't support OpenMP natively, so we configure libomp manually
+    message(STATUS "Configuring OpenMP for macOS with Apple Clang...")
+    
+    # Look for libomp in Homebrew locations
+    set(HOMEBREW_PREFIXES "/opt/homebrew" "/usr/local")
+    
+    foreach(PREFIX ${HOMEBREW_PREFIXES})
+        set(FOUND_LIBOMP FALSE)
+        set(LIBOMP_LIB_PATH "")
+        set(LIBOMP_INCLUDE_PATH "")
+        
+        # First try the standard linked locations
+        if(EXISTS "${PREFIX}/lib/libomp.dylib" AND EXISTS "${PREFIX}/include/omp.h")
+            set(FOUND_LIBOMP TRUE)
+            set(LIBOMP_LIB_PATH "${PREFIX}/lib/libomp.dylib")
+            set(LIBOMP_INCLUDE_PATH "${PREFIX}/include")
+            message(STATUS "Found libomp at: ${PREFIX} (linked)")
+        # Then try the keg-only opt location (recommended by Homebrew)
+        elseif(EXISTS "${PREFIX}/opt/libomp/lib/libomp.dylib" AND EXISTS "${PREFIX}/opt/libomp/include/omp.h")
+            set(FOUND_LIBOMP TRUE)
+            set(LIBOMP_LIB_PATH "${PREFIX}/opt/libomp/lib/libomp.dylib")
+            set(LIBOMP_INCLUDE_PATH "${PREFIX}/opt/libomp/include")
+            message(STATUS "Found libomp at: ${PREFIX}/opt/libomp (keg-only)")
+        else()
+            # Fallback: Look in Cellar directory
+            file(GLOB LIBOMP_CELLAR_DIRS "${PREFIX}/Cellar/libomp/*/")
+            foreach(CELLAR_DIR ${LIBOMP_CELLAR_DIRS})
+                if(EXISTS "${CELLAR_DIR}/lib/libomp.dylib" AND EXISTS "${CELLAR_DIR}/include/omp.h")
+                    set(FOUND_LIBOMP TRUE)
+                    set(LIBOMP_LIB_PATH "${CELLAR_DIR}/lib/libomp.dylib")
+                    set(LIBOMP_INCLUDE_PATH "${CELLAR_DIR}/include")
+                    message(STATUS "Found libomp at: ${CELLAR_DIR} (cellar)")
+                    break()
+                endif()
+            endforeach()
+        endif()
+        
+        if(FOUND_LIBOMP)
+            set(OpenMP_FOUND TRUE)
+            set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp")
+            set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp")
+            set(OpenMP_C_LIB_NAMES "omp")
+            set(OpenMP_CXX_LIB_NAMES "omp")
+            set(OpenMP_omp_LIBRARY "${LIBOMP_LIB_PATH}")
+            
+            # Create imported target for OpenMP
+            if(NOT TARGET OpenMP::OpenMP_CXX)
+                add_library(OpenMP::OpenMP_CXX UNKNOWN IMPORTED)
+                set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
+                    IMPORTED_LOCATION "${LIBOMP_LIB_PATH}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${LIBOMP_INCLUDE_PATH}"
+                    INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
+                    INTERFACE_LINK_LIBRARIES "${LIBOMP_LIB_PATH}"
+                )
+            endif()
+            
+            if(NOT TARGET OpenMP::OpenMP_C)
+                add_library(OpenMP::OpenMP_C UNKNOWN IMPORTED)
+                set_target_properties(OpenMP::OpenMP_C PROPERTIES
+                    IMPORTED_LOCATION "${LIBOMP_LIB_PATH}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${LIBOMP_INCLUDE_PATH}"
+                    INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
+                    INTERFACE_LINK_LIBRARIES "${LIBOMP_LIB_PATH}"
+                )
+            endif()
+            break()
+        endif()
+    endforeach()
+    
+    if(NOT OpenMP_FOUND)
+        message(WARNING "OpenMP (libomp) not found. Install with: brew install libomp")
+        message(WARNING "Building without OpenMP support.")
+    endif()
+else()
+    # On non-Apple systems, use the standard FindOpenMP
+    find_package(OpenMP)
+endif()
 
 # Create executables
 add_executable(quadblas_test test_quadblas.cpp)
@@ -62,12 +141,12 @@ if(SLEEF_CUSTOM_ROOT)
     
     target_link_libraries(quadblas_test 
         sleef sleefquad
-        $<$<TARGET_EXISTS:OpenMP::OpenMP_CXX>:OpenMP::OpenMP_CXX>
+        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
         $<$<CONFIG:DEBUG>:-fsanitize=address>
     )
     target_link_libraries(quadblas_benchmark 
         sleef sleefquad
-        $<$<TARGET_EXISTS:OpenMP::OpenMP_CXX>:OpenMP::OpenMP_CXX>
+        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
         $<$<CONFIG:DEBUG>:-fsanitize=address>
     )
 else()
@@ -89,12 +168,12 @@ else()
     
     target_link_libraries(quadblas_test 
         ${SLEEF_LIBRARIES}
-        $<$<TARGET_EXISTS:OpenMP::OpenMP_CXX>:OpenMP::OpenMP_CXX>
+        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
         $<$<CONFIG:DEBUG>:-fsanitize=address>
     )
     target_link_libraries(quadblas_benchmark 
         ${SLEEF_LIBRARIES}
-        $<$<TARGET_EXISTS:OpenMP::OpenMP_CXX>:OpenMP::OpenMP_CXX>
+        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
         $<$<CONFIG:DEBUG>:-fsanitize=address>
     )
 endif()
@@ -109,3 +188,10 @@ else()
     message(STATUS "  Libraries: ${SLEEF_LIBRARIES}")
 endif()
 message(STATUS "OpenMP found: ${OpenMP_FOUND}")
+if(OpenMP_FOUND)
+    message(STATUS "  OpenMP C flags: ${OpenMP_C_FLAGS}")
+    message(STATUS "  OpenMP CXX flags: ${OpenMP_CXX_FLAGS}")
+    message(STATUS "  OpenMP library: ${OpenMP_omp_LIBRARY}")
+else()
+    message(STATUS "  Building without OpenMP support")
+endif()
