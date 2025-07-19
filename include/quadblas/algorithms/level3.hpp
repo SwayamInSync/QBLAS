@@ -121,6 +121,32 @@ namespace QuadBLAS
     }
   }
 
+  inline void gemm_micro_kernel_unpacked_fallback(size_t mr, size_t nr, size_t kc,
+                                                  Sleef_quad alpha,
+                                                  Sleef_quad *A_panel, Sleef_quad *B_panel, size_t ldb_panel,
+                                                  Sleef_quad beta, Sleef_quad *C, size_t ldc)
+  {
+    for (size_t i = 0; i < mr; ++i)
+    {
+      for (size_t j = 0; j < nr; ++j)
+      {
+        Sleef_quad sum = SLEEF_QUAD_C(0.0);
+
+        // Innermost loop to compute the dot product
+        for (size_t k = 0; k < kc; ++k)
+        {
+          Sleef_quad a_val = A_panel[i * kc + k];
+          // Correctly index into the non-contiguous B panel using its leading dimension
+          Sleef_quad b_val = B_panel[k * ldb_panel + j];
+          sum = Sleef_fmaq1_u05(a_val, b_val, sum);
+        }
+
+        // Apply alpha and beta to the final sum
+        Sleef_quad c_old = C[i * ldc + j];
+        C[i * ldc + j] = Sleef_fmaq1_u05(alpha, sum, Sleef_mulq1_u05(beta, c_old));
+      }
+    }
+  }
   inline void gemm_macro_kernel(size_t mc, size_t nc, size_t kc,
                                 Sleef_quad alpha,
                                 Sleef_quad *A_packed, Sleef_quad *B_packed,
@@ -137,10 +163,13 @@ namespace QuadBLAS
       {
         size_t nr = std::min(NR, nc - j);
 
+        // --- FAST PATH ---
+        // Try to allocate a small, contiguous buffer for the B sub-matrix to ensure
+        // cache-friendly access in the highly optimized micro-kernel.
         Sleef_quad *B_sub = aligned_alloc<Sleef_quad>(kc * nr);
         if (B_sub)
         {
-
+          // Repack the B sub-matrix into the contiguous buffer
           for (size_t k = 0; k < kc; ++k)
           {
             for (size_t jj = 0; jj < nr; ++jj)
@@ -149,18 +178,24 @@ namespace QuadBLAS
             }
           }
 
+          // Call the fast micro-kernel with the packed sub-matrix
           gemm_micro_kernel(mr, nr, kc, alpha,
                             &A_packed[i * kc], B_sub,
                             beta, &C[i * ldc + j], ldc);
 
           aligned_free(B_sub);
         }
+        // --- FALLBACK PATH ---
+        // If allocation fails (due to memory pressure), use the fallback kernel
+        // that works directly on the non-contiguous B_packed panel. This will be
+        // slower but guarantees a correct result, preventing crashes and NaNs.
         else
         {
-
-          gemm_micro_kernel_scalar(mr, nr, kc, alpha,
-                                   &A_packed[i * kc], &B_packed[j],
-                                   beta, &C[i * ldc + j], ldc);
+          gemm_micro_kernel_unpacked_fallback(mr, nr, kc, alpha,
+                                              &A_packed[i * kc], // Pointer to A panel
+                                              &B_packed[j],      // Pointer to start column in B panel
+                                              nc,                // Stride of the B panel
+                                              beta, &C[i * ldc + j], ldc);
         }
       }
     }
