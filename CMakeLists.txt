@@ -29,7 +29,7 @@ find_package(OpenMP)
 
 # Create executables
 add_executable(quadblas_test test_quadblas.cpp)
-add_executable(quadblas_benchmark benchmark.cpp)
+add_executable(quadblas_benchmark quaddtype_tests.cpp)
 
 # Set C++ standard
 target_compile_features(quadblas_test PRIVATE cxx_std_17)
