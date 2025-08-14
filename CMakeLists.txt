@@ -1,166 +1,149 @@
 cmake_minimum_required(VERSION 3.15)
 project(QuadBLAS)
-set(SLEEF_CUSTOM_ROOT "$ENV{SLEEF_ROOT}")
 
-if(SLEEF_CUSTOM_ROOT)
-    message(STATUS "Using custom SLEEF installation: ${SLEEF_CUSTOM_ROOT}")
-    set(SLEEF_INCLUDE_DIR "${SLEEF_CUSTOM_ROOT}/include")
-    set(SLEEF_LIB_DIR "${SLEEF_CUSTOM_ROOT}/lib")
-    if(NOT EXISTS ${SLEEF_INCLUDE_DIR})
-        message(FATAL_ERROR "SLEEF include directory not found: ${SLEEF_INCLUDE_DIR}")
-    endif()
-    if(NOT EXISTS ${SLEEF_LIB_DIR})
-        message(FATAL_ERROR "SLEEF library directory not found: ${SLEEF_LIB_DIR}")
-    endif()
-    
-else()
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SLEEF REQUIRED sleef)
+# Set build type to Release if not specified
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-set(OpenMP_FOUND FALSE)
 
+# Set C++ standard globally
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Find OpenMP (your existing code)
 if(APPLE)
-    message(STATUS "Configuring OpenMP for macOS with Apple Clang...")
-    set(HOMEBREW_PREFIXES "/opt/homebrew" "/usr/local")
+    find_library(OpenMP_LIBRARY
+        NAMES omp gomp iomp5
+        PATHS /opt/homebrew/lib /usr/local/lib /opt/homebrew/opt/libomp/lib
+        NO_DEFAULT_PATH
+    )
+    find_path(OpenMP_INCLUDE_DIR
+        NAMES omp.h
+        PATHS /opt/homebrew/include /usr/local/include /opt/homebrew/opt/libomp/include
+        NO_DEFAULT_PATH
+    )
     
-    foreach(PREFIX ${HOMEBREW_PREFIXES})
-        set(FOUND_LIBOMP FALSE)
-        set(LIBOMP_LIB_PATH "")
-        set(LIBOMP_INCLUDE_PATH "")
-        if(EXISTS "${PREFIX}/lib/libomp.dylib" AND EXISTS "${PREFIX}/include/omp.h")
-            set(FOUND_LIBOMP TRUE)
-            set(LIBOMP_LIB_PATH "${PREFIX}/lib/libomp.dylib")
-            set(LIBOMP_INCLUDE_PATH "${PREFIX}/include")
-            message(STATUS "Found libomp at: ${PREFIX} (linked)")
-        elseif(EXISTS "${PREFIX}/opt/libomp/lib/libomp.dylib" AND EXISTS "${PREFIX}/opt/libomp/include/omp.h")
-            set(FOUND_LIBOMP TRUE)
-            set(LIBOMP_LIB_PATH "${PREFIX}/opt/libomp/lib/libomp.dylib")
-            set(LIBOMP_INCLUDE_PATH "${PREFIX}/opt/libomp/include")
-            message(STATUS "Found libomp at: ${PREFIX}/opt/libomp (keg-only)")
-        else()
-            file(GLOB LIBOMP_CELLAR_DIRS "${PREFIX}/Cellar/libomp/*/")
-            foreach(CELLAR_DIR ${LIBOMP_CELLAR_DIRS})
-                if(EXISTS "${CELLAR_DIR}/lib/libomp.dylib" AND EXISTS "${CELLAR_DIR}/include/omp.h")
-                    set(FOUND_LIBOMP TRUE)
-                    set(LIBOMP_LIB_PATH "${CELLAR_DIR}/lib/libomp.dylib")
-                    set(LIBOMP_INCLUDE_PATH "${CELLAR_DIR}/include")
-                    message(STATUS "Found libomp at: ${CELLAR_DIR} (cellar)")
-                    break()
-                endif()
-            endforeach()
-        endif()
-        
-        if(FOUND_LIBOMP)
-            set(OpenMP_FOUND TRUE)
-            set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp")
-            set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp")
-            set(OpenMP_C_LIB_NAMES "omp")
-            set(OpenMP_CXX_LIB_NAMES "omp")
-            set(OpenMP_omp_LIBRARY "${LIBOMP_LIB_PATH}")
-            if(NOT TARGET OpenMP::OpenMP_CXX)
-                add_library(OpenMP::OpenMP_CXX UNKNOWN IMPORTED)
-                set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
-                    IMPORTED_LOCATION "${LIBOMP_LIB_PATH}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${LIBOMP_INCLUDE_PATH}"
-                    INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
-                    INTERFACE_LINK_LIBRARIES "${LIBOMP_LIB_PATH}"
-                )
-            endif()
-            
-            if(NOT TARGET OpenMP::OpenMP_C)
-                add_library(OpenMP::OpenMP_C UNKNOWN IMPORTED)
-                set_target_properties(OpenMP::OpenMP_C PROPERTIES
-                    IMPORTED_LOCATION "${LIBOMP_LIB_PATH}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${LIBOMP_INCLUDE_PATH}"
-                    INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
-                    INTERFACE_LINK_LIBRARIES "${LIBOMP_LIB_PATH}"
-                )
-            endif()
-            break()
-        endif()
-    endforeach()
-    
-    if(NOT OpenMP_FOUND)
-        message(WARNING "OpenMP (libomp) not found. Install with: brew install libomp")
-        message(WARNING "Building without OpenMP support.")
+    if(OpenMP_LIBRARY AND OpenMP_INCLUDE_DIR)
+        set(OpenMP_FOUND TRUE)
+        add_library(OpenMP::OpenMP_CXX UNKNOWN IMPORTED)
+        set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
+            IMPORTED_LOCATION "${OpenMP_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OpenMP_INCLUDE_DIR}"
+            INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
+        )
+        message(STATUS "Found OpenMP: ${OpenMP_LIBRARY}")
+    else()
+        set(OpenMP_FOUND FALSE)
+        message(WARNING "OpenMP not found. Install with: brew install libomp")
     endif()
 else()
     find_package(OpenMP)
 endif()
+
+# Handle SLEEF library (fixed for your environment)
+set(SLEEF_CUSTOM_ROOT "$ENV{SLEEF_ROOT}")
+if(SLEEF_CUSTOM_ROOT)
+    set(SLEEF_INCLUDE_DIR "${SLEEF_CUSTOM_ROOT}/include")
+    set(SLEEF_LIB_DIR "${SLEEF_CUSTOM_ROOT}/lib")
+    if(NOT EXISTS ${SLEEF_INCLUDE_DIR} OR NOT EXISTS ${SLEEF_LIB_DIR})
+        message(FATAL_ERROR "SLEEF installation not found at: ${SLEEF_CUSTOM_ROOT}")
+    endif()
+    
+    find_library(SLEEF_LIBRARY 
+        NAMES sleef
+        PATHS ${SLEEF_LIB_DIR}
+        NO_DEFAULT_PATH
+    )
+    find_library(SLEEFQUAD_LIBRARY 
+        NAMES sleefquad
+        PATHS ${SLEEF_LIB_DIR}
+        NO_DEFAULT_PATH
+    )
+    
+    if(SLEEF_LIBRARY AND SLEEFQUAD_LIBRARY)
+        set(SLEEF_LIBRARIES ${SLEEF_LIBRARY} ${SLEEFQUAD_LIBRARY})
+        message(STATUS "Using SLEEF from: ${SLEEF_CUSTOM_ROOT}")
+        message(STATUS "Found SLEEF libraries: ${SLEEF_LIBRARIES}")
+    else()
+        message(FATAL_ERROR "SLEEF libraries not found in ${SLEEF_LIB_DIR}")
+    endif()
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SLEEF REQUIRED sleef)
+endif()
+
+# Add Google Benchmark with proper Release configuration
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/benchmark/CMakeLists.txt")
+    # Configure Google Benchmark for Release mode and disable testing
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Enable testing of the benchmark library.")
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "Enable Google Test in benchmark.")
+    set(BENCHMARK_DOWNLOAD_DEPENDENCIES ON CACHE BOOL "Allow benchmark to download dependencies.")
+    
+    # Ensure benchmark is built in Release mode
+    set(CMAKE_BUILD_TYPE_BACKUP ${CMAKE_BUILD_TYPE})
+    set(CMAKE_BUILD_TYPE Release)
+    
+    add_subdirectory(third_party/benchmark)
+    
+    # Restore original build type
+    set(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE_BACKUP})
+    
+    set(GOOGLE_BENCHMARK_AVAILABLE TRUE)
+    message(STATUS "Google Benchmark added (Release mode)")
+else()
+    set(GOOGLE_BENCHMARK_AVAILABLE FALSE)
+    message(STATUS "Google Benchmark not found (run: git submodule add https://github.com/google/benchmark.git third_party/benchmark)")
+endif()
+
+# Create executables
 add_executable(quadblas_test test_quadblas.cpp)
-add_executable(quadblas_benchmark benchmark.cpp)
-target_compile_features(quadblas_test PRIVATE cxx_std_17)
-target_compile_features(quadblas_benchmark PRIVATE cxx_std_17)
-target_compile_options(quadblas_test PRIVATE 
-    -O3 -march=native -ffast-math
-    $<$<CONFIG:DEBUG>:-g -fsanitize=address>
-)
-target_compile_options(quadblas_benchmark PRIVATE 
-    -O3 -march=native -ffast-math
-    $<$<CONFIG:DEBUG>:-g -fsanitize=address>
-)
-if(SLEEF_CUSTOM_ROOT)
-    target_include_directories(quadblas_test PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
-        ${SLEEF_INCLUDE_DIR}
-    )
-    target_include_directories(quadblas_benchmark PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
-        ${SLEEF_INCLUDE_DIR}
-    )
-    target_link_directories(quadblas_test PRIVATE ${SLEEF_LIB_DIR})
-    target_link_directories(quadblas_benchmark PRIVATE ${SLEEF_LIB_DIR})
+add_executable(quadblas_benchmark_legacy benchmarks/legacy_benchmark.cpp)
+
+# Add Google Benchmark executable if available
+if(GOOGLE_BENCHMARK_AVAILABLE)
+    add_executable(quadblas_benchmark benchmarks/benchmark.cpp)
+endif()
+
+# Common configuration function
+function(configure_target target_name)
+    target_compile_features(${target_name} PRIVATE cxx_std_17)
     
-    target_link_libraries(quadblas_test 
-        sleef sleefquad
-        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
-        $<$<CONFIG:DEBUG>:-fsanitize=address>
-    )
-    target_link_libraries(quadblas_benchmark 
-        sleef sleefquad
-        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
-        $<$<CONFIG:DEBUG>:-fsanitize=address>
-    )
-else()
-    target_include_directories(quadblas_test PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
-        ${SLEEF_INCLUDE_DIRS}
-    )
-    target_include_directories(quadblas_benchmark PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}  # For QuadBLAS headers
-        ${SLEEF_INCLUDE_DIRS}
+    # Set optimization flags based on build type
+    target_compile_options(${target_name} PRIVATE 
+        $<$<CONFIG:Release>:-O3 -march=native -ffast-math -DNDEBUG>
+        $<$<CONFIG:Debug>:-g -O0 -fsanitize=address>
+        $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native -ffast-math>
     )
     
-    target_link_directories(quadblas_test PRIVATE ${SLEEF_LIBRARY_DIRS})
-    target_link_directories(quadblas_benchmark PRIVATE ${SLEEF_LIBRARY_DIRS})
+    target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     
-    target_compile_definitions(quadblas_test PRIVATE ${SLEEF_CFLAGS_OTHER})
-    target_compile_definitions(quadblas_benchmark PRIVATE ${SLEEF_CFLAGS_OTHER})
+    if(SLEEF_CUSTOM_ROOT)
+        target_include_directories(${target_name} PRIVATE ${SLEEF_INCLUDE_DIR})
+    else()
+        target_include_directories(${target_name} PRIVATE ${SLEEF_INCLUDE_DIRS})
+        target_link_directories(${target_name} PRIVATE ${SLEEF_LIBRARY_DIRS})
+        target_compile_definitions(${target_name} PRIVATE ${SLEEF_CFLAGS_OTHER})
+    endif()
     
-    target_link_libraries(quadblas_test 
+    target_link_libraries(${target_name} 
         ${SLEEF_LIBRARIES}
         $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
-        $<$<CONFIG:DEBUG>:-fsanitize=address>
+        $<$<CONFIG:Debug>:-fsanitize=address>
     )
-    target_link_libraries(quadblas_benchmark 
-        ${SLEEF_LIBRARIES}
-        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
-        $<$<CONFIG:DEBUG>:-fsanitize=address>
-    )
+endfunction()
+
+# Configure targets
+configure_target(quadblas_test)
+configure_target(quadblas_benchmark_legacy)
+
+# Configure Google Benchmark target with proper linking
+if(GOOGLE_BENCHMARK_AVAILABLE)
+    configure_target(quadblas_benchmark)
+    target_link_libraries(quadblas_benchmark benchmark::benchmark benchmark::benchmark_main)
 endif()
-message(STATUS "SLEEF configuration:")
-if(SLEEF_CUSTOM_ROOT)
-    message(STATUS "  Custom installation: ${SLEEF_CUSTOM_ROOT}")
-else()
-    message(STATUS "  System installation via pkg-config")
-    message(STATUS "  Include dirs: ${SLEEF_INCLUDE_DIRS}")
-    message(STATUS "  Libraries: ${SLEEF_LIBRARIES}")
-endif()
-message(STATUS "OpenMP found: ${OpenMP_FOUND}")
-if(OpenMP_FOUND)
-    message(STATUS "  OpenMP C flags: ${OpenMP_C_FLAGS}")
-    message(STATUS "  OpenMP CXX flags: ${OpenMP_CXX_FLAGS}")
-    message(STATUS "  OpenMP library: ${OpenMP_omp_LIBRARY}")
-else()
-    message(STATUS "  Building without OpenMP support")
-endif()
+
+message(STATUS "=== Configuration ===")
+message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "OpenMP: ${OpenMP_FOUND}")
+message(STATUS "SLEEF: ${SLEEF_LIBRARIES}")
+message(STATUS "Google Benchmark: ${GOOGLE_BENCHMARK_AVAILABLE}")

@@ -71,10 +71,7 @@ namespace QuadBLAS
     // AXPY: this = alpha * other + this
     void axpy(Sleef_quad alpha, const Vector &other)
     {
-      for (size_t i = 0; i < size_; ++i)
-      {
-        (*this)[i] = Sleef_fmaq1_u05(alpha, other[i], (*this)[i]);
-      }
+      QuadBLAS::axpy(size_, alpha, other.data_, other.stride_, data_, stride_);
     }
 
     // Norm
