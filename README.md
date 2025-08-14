@@ -2,8 +2,6 @@
 
 QuadBLAS is a high-performance linear algebra library implementing BLAS-compliant routines for IEEE 754 quadruple precision (binary128) floating-point arithmetic. Built as a header-only templated library on top of the SLEEF vectorized mathematical library, QuadBLAS provides optimized implementations of fundamental linear algebra operations with significant performance improvements over naive implementations.
 
-
-
 ## Technical Features
 
 - **Quadruple Precision Arithmetic**: Full IEEE 754 binary128 (128-bit) floating-point support
@@ -19,13 +17,13 @@ QuadBLAS is a high-performance linear algebra library implementing BLAS-complian
 
 QuadBLAS demonstrates substantial performance improvements over naive implementations through algorithmic optimizations and parallel execution:
 
-| Operation Category | Problem Scale | Performance Improvement | Throughput |
-|-------------------|---------------|------------------------|------------|
-| Level 1 BLAS (DDOT) | 10^5 elements | 21× over serial implementation | Vectorized execution |
-| Level 2 BLAS (DGEMV) | 1500×1500 matrix | 75× over serial implementation | 1.6 GFLOPS sustained |
+| Operation Category   | Problem Scale      | Performance Improvement         | Throughput            |
+| -------------------- | ------------------ | ------------------------------- | --------------------- |
+| Level 1 BLAS (DDOT)  | 10^5 elements      | 21× over serial implementation  | Vectorized execution  |
+| Level 2 BLAS (DGEMV) | 1500×1500 matrix   | 75× over serial implementation  | 1.6 GFLOPS sustained  |
 | Level 3 BLAS (DGEMM) | 1000×1000 matrices | 2.8× over serial implementation | 0.06 GFLOPS sustained |
 
-*Performance measurements conducted on multi-core x86-64 architecture with OpenMP threading enabled.*
+_Performance measurements conducted on multi-core x86-64 architecture with OpenMP threading enabled._
 
 ## Prerequisites
 
@@ -35,6 +33,8 @@ QuadBLAS demonstrates substantial performance improvements over naive implementa
 - OpenMP runtime (optional, required for multi-threading)
 
 ## Installation
+
+We already provide a `build.sh` file, which can directly executes the steps detailed as follows:
 
 For systems with SLEEF built from source or non-standard installation paths:
 
@@ -46,12 +46,12 @@ export SLEEF_ROOT=/path/to/sleef/installation
 git clone https://github.com/your-org/QuadBLAS.git
 cd QuadBLAS
 mkdir build && cd build
-cmake ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 
 # Execute test suite
 ./quadblas_test
-./quadblas_benchmark
+./quadblas_benchmark --benchmark_min_time=0.5s
 ```
 
 ## Usage
@@ -74,12 +74,12 @@ For direct integration into existing projects:
 
 int main() {
     using namespace QuadBLAS;
-    
+
     // Instantiate quadruple precision containers
     const size_t n = 1000;
     DefaultVector<> x(n), y(n);
     DefaultMatrix<> A(n, n);
-    
+
     // Initialize with quadruple precision values
     for (size_t i = 0; i < n; ++i) {
         x[i] = Sleef_cast_from_doubleq1(static_cast<double>(i + 1));
@@ -88,12 +88,12 @@ int main() {
             A(i, j) = Sleef_cast_from_doubleq1((i == j) ? 2.0 : 0.1);
         }
     }
-    
+
     // Execute optimized linear algebra operations
     Sleef_quad dot_result = x.dot(y);                    // Level 1 BLAS: DDOT
     Sleef_quad norm_result = x.norm();                   // Level 1 BLAS: DNRM2
     A.gemv(SLEEF_QUAD_C(1.0), x, SLEEF_QUAD_C(0.0), y); // Level 2 BLAS: DGEMV
-    
+
     return 0;
 }
 ```
@@ -110,7 +110,7 @@ double result = quadblas_qdot(n, x_ptr, 1, y_ptr, 1);
 // y := alpha*A*x + beta*y
 quadblas_qgemv('R', 'N', m, n, 1.0, A_ptr, lda, x_ptr, 1, 0.0, y_ptr, 1);
 
-// Level 3 BLAS: Matrix-matrix multiplication  
+// Level 3 BLAS: Matrix-matrix multiplication
 // C := alpha*A*B + beta*C
 quadblas_qgemm('R', 'N', 'N', m, n, k, 1.0, A_ptr, lda, B_ptr, ldb, 0.0, C_ptr, ldc);
 
@@ -144,7 +144,7 @@ QuadBLAS::DefaultVector<> x(3), y(3);
 
 // Configure test case prone to catastrophic cancellation in double precision
 x[0] = Sleef_cast_from_doubleq1(1e20);   // Large positive value
-x[1] = Sleef_cast_from_doubleq1(1.0);    // Unit value  
+x[1] = Sleef_cast_from_doubleq1(1.0);    // Unit value
 x[2] = Sleef_cast_from_doubleq1(-1e20);  // Large negative value
 
 y[0] = y[1] = y[2] = Sleef_cast_from_doubleq1(1.0);
@@ -178,6 +178,7 @@ We welcome contributions to QuadBLAS development. Please follow established cont
 - Integration support for additional programming languages
 
 ## Citation
+
 ```bibtex
 @software{quadblas2025,
   title = {QuadBLAS: High-Performance Linear Algebra for Quadruple Precision Computing},
@@ -190,6 +191,7 @@ We welcome contributions to QuadBLAS development. Please follow established cont
 ```
 
 ## Acknowledgments
+
 ```
 @software{sleef,
   title = {SLEEF: A Portable Vectorized Library of Elementary Functions},

@@ -48,9 +48,25 @@ if(SLEEF_CUSTOM_ROOT)
     if(NOT EXISTS ${SLEEF_INCLUDE_DIR} OR NOT EXISTS ${SLEEF_LIB_DIR})
         message(FATAL_ERROR "SLEEF installation not found at: ${SLEEF_CUSTOM_ROOT}")
     endif()
-    # Use dynamic libraries (.dylib) instead of static (.a)
-    set(SLEEF_LIBRARIES "${SLEEF_LIB_DIR}/libsleef.dylib" "${SLEEF_LIB_DIR}/libsleefquad.dylib")
-    message(STATUS "Using SLEEF from: ${SLEEF_CUSTOM_ROOT}")
+    
+    find_library(SLEEF_LIBRARY 
+        NAMES sleef
+        PATHS ${SLEEF_LIB_DIR}
+        NO_DEFAULT_PATH
+    )
+    find_library(SLEEFQUAD_LIBRARY 
+        NAMES sleefquad
+        PATHS ${SLEEF_LIB_DIR}
+        NO_DEFAULT_PATH
+    )
+    
+    if(SLEEF_LIBRARY AND SLEEFQUAD_LIBRARY)
+        set(SLEEF_LIBRARIES ${SLEEF_LIBRARY} ${SLEEFQUAD_LIBRARY})
+        message(STATUS "Using SLEEF from: ${SLEEF_CUSTOM_ROOT}")
+        message(STATUS "Found SLEEF libraries: ${SLEEF_LIBRARIES}")
+    else()
+        message(FATAL_ERROR "SLEEF libraries not found in ${SLEEF_LIB_DIR}")
+    endif()
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SLEEF REQUIRED sleef)
