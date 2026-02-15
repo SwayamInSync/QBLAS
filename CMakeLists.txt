@@ -139,7 +139,7 @@ configure_target(quadblas_benchmark_legacy)
 # Configure Google Benchmark target with proper linking
 if(GOOGLE_BENCHMARK_AVAILABLE)
     configure_target(quadblas_benchmark)
-    target_link_libraries(quadblas_benchmark benchmark::benchmark benchmark::benchmark_main)
+    target_link_libraries(quadblas_benchmark benchmark::benchmark)
 endif()
 
 message(STATUS "=== Configuration ===")

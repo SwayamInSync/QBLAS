@@ -47,7 +47,7 @@ jobs:
           cd build
           if [ -f "./quadblas_benchmark" ]; then
             echo "Running Google Benchmark tests..."
-            ./quadblas_benchmark --benchmark_min_time=0.1s --benchmark_filter="BM_DOT.*|BM_AXPY.*"
+            ./quadblas_benchmark --benchmark_min_time=0.1s --benchmark_filter="BM_DotProduct|BM_AXPY|BM_VectorNorm"
           else
             echo "Google Benchmark not available, running legacy benchmark..."
             ./quadblas_benchmark_legacy
@@ -58,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-13, macos-14]
+        os: [macos-14, macos-15]
 
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +108,7 @@ jobs:
           cd build
           if [ -f "./quadblas_benchmark" ]; then
             echo "Running Google Benchmark tests..."
-            ./quadblas_benchmark --benchmark_min_time=0.1s --benchmark_filter="BM_DOT.*|BM_AXPY.*"
+            ./quadblas_benchmark --benchmark_min_time=0.1s --benchmark_filter="BM_DotProduct|BM_AXPY|BM_VectorNorm"
           else
             echo "Google Benchmark not available, running legacy benchmark..."
             ./quadblas_benchmark_legacy

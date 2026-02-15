@@ -35,27 +35,18 @@ namespace QuadBLAS
 
     QuadVector(Sleef_quad a, Sleef_quad b)
     {
-      // Universal fallback: create via load from heap memory
-      Sleef_quad *temp = aligned_alloc<Sleef_quad>(2);
-      if (temp)
-      {
-        temp[0] = a;
-        temp[1] = b;
-        *this = QuadVector::load(temp); // Use the working load function
-        aligned_free(temp);
-      }
-      else
-      {
-        // Emergency fallback if allocation fails
+      // Use stack-aligned buffer instead of heap allocation
+      alignas(ALIGNMENT) Sleef_quad temp[2];
+      temp[0] = a;
+      temp[1] = b;
 #ifdef QUADBLAS_X86_64
-        data_ = Sleef_splatq2_sse2(a); // At least get one value
+      data_ = Sleef_loadq2_sse2(temp);
 #elif defined(QUADBLAS_AARCH64)
-        data_ = Sleef_splatq2_advsimd(a);
+      data_ = Sleef_loadq2_advsimd(temp);
 #else
-        data_[0] = a;
-        data_[1] = a; // Not ideal but safe
+      data_[0] = a;
+      data_[1] = b;
 #endif
-      }
     }
 
     static QuadVector load(Sleef_quad *ptr)
@@ -70,6 +61,12 @@ namespace QuadBLAS
       result.data_[1] = ptr[1];
 #endif
       return result;
+    }
+
+    // Const overload: SLEEF load takes non-const but doesn't modify memory
+    static QuadVector load(const Sleef_quad *ptr)
+    {
+      return load(const_cast<Sleef_quad *>(ptr));
     }
 
     void store(Sleef_quad *ptr) const

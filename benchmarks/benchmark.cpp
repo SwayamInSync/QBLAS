@@ -365,17 +365,21 @@ BENCHMARK(BM_ColMajorGEMV)
     ->Range(100, 800)
     ->Unit(benchmark::kMillisecond);
 
-// Level 3 BLAS - Matrix sizes from 64x64 to 1024x1024
+// Level 3 BLAS - Matrix sizes from 64x64 to 512x512 (practical for quad precision)
 BENCHMARK(BM_GEMM)
     ->RangeMultiplier(2)
-    ->Range(64, 1024)
+    ->Range(64, 512)
     ->Unit(benchmark::kMillisecond)
     ->MinTime(2.0); // Ensure sufficient measurement time
 
-// Threading scalability - Test 1, 2, 4, 8, 16 threads
-BENCHMARK(BM_ThreadingScalability)
-    ->DenseRange(1, std::min(16, QuadBLAS::get_num_threads()), 1)
-    ->Unit(benchmark::kMicrosecond);
+// Threading scalability - range set in main() to avoid static init issues
+static void RegisterThreadingBenchmarks()
+{
+    int max_threads = std::min(16, QuadBLAS::get_num_threads());
+    ::benchmark::RegisterBenchmark("BM_ThreadingScalability", BM_ThreadingScalability)
+        ->DenseRange(1, max_threads, 1)
+        ->Unit(benchmark::kMicrosecond);
+}
 
 // Numerical precision test
 BENCHMARK(BM_NumericalPrecision)
@@ -413,6 +417,9 @@ int main(int argc, char **argv)
 #endif
 
     std::cout << "=========================================" << std::endl;
+
+    // Register benchmarks that need runtime info
+    RegisterThreadingBenchmarks();
 
     // Initialize and run benchmarks
     ::benchmark::Initialize(&argc, argv);
