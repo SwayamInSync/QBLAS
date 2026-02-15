@@ -13,8 +13,8 @@ namespace QuadBLAS
   // GEMV: y = alpha * A * x + beta * y
   // Row-major implementation
   inline void gemv_row_major(size_t m, size_t n, Sleef_quad alpha,
-                             Sleef_quad *A, size_t lda,
-                             Sleef_quad *x, size_t incx,
+                             const Sleef_quad *A, size_t lda,
+                             const Sleef_quad *x, size_t incx,
                              Sleef_quad beta, Sleef_quad *y, size_t incy)
   {
 
@@ -28,26 +28,22 @@ namespace QuadBLAS
 #endif
     for (size_t i = 0; i < m; ++i)
     {
-      // Compute dot product of row i with vector x
       Sleef_quad sum = SLEEF_QUAD_C(0.0);
 
-      Sleef_quad *row = &A[i * lda];
+      const Sleef_quad *row = &A[i * lda];
 
-      // Vectorized inner loop
       if (incx == 1)
       {
         sum = dot_kernel_vectorized(row, x, n);
       }
       else
       {
-        // Strided access
         for (size_t j = 0; j < n; ++j)
         {
           sum = Sleef_fmaq1_u05(row[j], x[j * incx], sum);
         }
       }
 
-      // y[i] = alpha * sum + beta * y[i]
       size_t y_idx = i * incy;
       y[y_idx] = Sleef_fmaq1_u05(alpha, sum, Sleef_mulq1_u05(beta, y[y_idx]));
     }
@@ -87,8 +83,8 @@ namespace QuadBLAS
 
   // Main GEMV function
   inline void gemv(Layout layout, size_t m, size_t n, Sleef_quad alpha,
-                   Sleef_quad *A, size_t lda,
-                   Sleef_quad *x, size_t incx,
+                   const Sleef_quad *A, size_t lda,
+                   const Sleef_quad *x, size_t incx,
                    Sleef_quad beta, Sleef_quad *y, size_t incy)
   {
 

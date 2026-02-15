@@ -10,25 +10,22 @@
 namespace QuadBLAS
 {
 
-  // Vectorized dot product kernel for aligned data
-  inline Sleef_quad dot_kernel_vectorized(Sleef_quad *x, Sleef_quad *y, size_t n)
+  // Vectorized dot product kernel for contiguous data
+  inline Sleef_quad dot_kernel_vectorized(const Sleef_quad *x, const Sleef_quad *y, size_t n)
   {
     const size_t vec_n = n / VECTOR_SIZE;
-    const size_t remainder = n % VECTOR_SIZE;
 
     QuadVector sum_vec(SLEEF_QUAD_C(0.0));
 
-    // Vectorized loop
     for (size_t i = 0; i < vec_n; ++i)
     {
       QuadVector x_vec = QuadVector::load(&x[i * VECTOR_SIZE]);
       QuadVector y_vec = QuadVector::load(&y[i * VECTOR_SIZE]);
-      sum_vec = x_vec.fma(y_vec, sum_vec); // x*y + sum
+      sum_vec = x_vec.fma(y_vec, sum_vec);
     }
 
     Sleef_quad result = sum_vec.horizontal_sum();
 
-    // Handle remainder
     for (size_t i = vec_n * VECTOR_SIZE; i < n; ++i)
     {
       result = Sleef_fmaq1_u05(x[i], y[i], result);
@@ -38,7 +35,7 @@ namespace QuadBLAS
   }
 
   // Parallel dot product for large vectors
-  inline Sleef_quad dot_parallel(Sleef_quad *x, Sleef_quad *y, size_t n)
+  inline Sleef_quad dot_parallel(const Sleef_quad *x, const Sleef_quad *y, size_t n)
   {
     if (n < PARALLEL_THRESHOLD)
     {
@@ -49,7 +46,6 @@ namespace QuadBLAS
     const int num_threads = get_num_threads();
     const size_t chunk_size = n / num_threads;
 
-    // Use array for partial results since OpenMP reduction doesn't work with struct types
     std::vector<Sleef_quad> partial_results(num_threads);
     for (int i = 0; i < num_threads; ++i)
     {
@@ -68,7 +64,6 @@ namespace QuadBLAS
       }
     }
 
-    // Combine partial results
     Sleef_quad result = SLEEF_QUAD_C(0.0);
     for (int i = 0; i < num_threads; ++i)
     {
@@ -82,19 +77,17 @@ namespace QuadBLAS
   }
 
   // Main dot product function with stride support
-  inline Sleef_quad dot(size_t n, Sleef_quad *x, size_t incx,
-                        Sleef_quad *y, size_t incy)
+  inline Sleef_quad dot(size_t n, const Sleef_quad *x, size_t incx,
+                        const Sleef_quad *y, size_t incy)
   {
     if (n == 0)
       return SLEEF_QUAD_C(0.0);
 
-    // Fast path for unit strides
     if (incx == 1 && incy == 1)
     {
       return dot_parallel(x, y, n);
     }
 
-    // Strided access
     Sleef_quad result = SLEEF_QUAD_C(0.0);
 
     if (n >= PARALLEL_THRESHOLD)
@@ -102,7 +95,6 @@ namespace QuadBLAS
 #ifdef _OPENMP
       const int num_threads = get_num_threads();
 
-      // Use array for partial results
       std::vector<Sleef_quad> partial_results(num_threads);
       for (int i = 0; i < num_threads; ++i)
       {
@@ -122,7 +114,6 @@ namespace QuadBLAS
         }
       }
 
-      // Combine partial results
       for (int i = 0; i < num_threads; ++i)
       {
         result = Sleef_addq1_u05(result, partial_results[i]);
@@ -145,24 +136,21 @@ namespace QuadBLAS
     return result;
   }
 
-  // Vectorized AXPY kernel for aligned data (y = alpha * x + y)
-  inline void axpy_kernel_vectorized(Sleef_quad alpha, Sleef_quad *x, Sleef_quad *y, size_t n)
+  // Vectorized AXPY kernel (y = alpha * x + y)
+  inline void axpy_kernel_vectorized(Sleef_quad alpha, const Sleef_quad *x, Sleef_quad *y, size_t n)
   {
     const size_t vec_n = n / VECTOR_SIZE;
-    const size_t remainder = n % VECTOR_SIZE;
 
     QuadVector alpha_vec(alpha);
 
-    // Vectorized loop
     for (size_t i = 0; i < vec_n; ++i)
     {
       QuadVector x_vec = QuadVector::load(&x[i * VECTOR_SIZE]);
       QuadVector y_vec = QuadVector::load(&y[i * VECTOR_SIZE]);
-      QuadVector result_vec = x_vec.fma(alpha_vec, y_vec); // alpha*x + y
+      QuadVector result_vec = x_vec.fma(alpha_vec, y_vec);
       result_vec.store(&y[i * VECTOR_SIZE]);
     }
 
-    // Handle remainder
     for (size_t i = vec_n * VECTOR_SIZE; i < n; ++i)
     {
       y[i] = Sleef_fmaq1_u05(alpha, x[i], y[i]);
@@ -170,7 +158,7 @@ namespace QuadBLAS
   }
 
   // Parallel AXPY for large vectors
-  inline void axpy_parallel(Sleef_quad alpha, Sleef_quad *x, Sleef_quad *y, size_t n)
+  inline void axpy_parallel(Sleef_quad alpha, const Sleef_quad *x, Sleef_quad *y, size_t n)
   {
     if (n < PARALLEL_THRESHOLD)
     {
@@ -199,19 +187,17 @@ namespace QuadBLAS
   }
 
   // Main AXPY function with stride support
-  inline void axpy(size_t n, Sleef_quad alpha, Sleef_quad *x, size_t incx, Sleef_quad *y, size_t incy)
+  inline void axpy(size_t n, Sleef_quad alpha, const Sleef_quad *x, size_t incx, Sleef_quad *y, size_t incy)
   {
     if (n == 0)
       return;
 
-    // Fast path for unit strides
     if (incx == 1 && incy == 1)
     {
       axpy_parallel(alpha, x, y, n);
       return;
     }
 
-    // Strided access
     if (n >= PARALLEL_THRESHOLD)
     {
 #ifdef _OPENMP

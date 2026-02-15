@@ -55,12 +55,12 @@ namespace QuadBLAS
     Vector &operator=(const Vector &) = delete;
 
     Sleef_quad &operator[](size_t i) { return data_[i * stride_]; }
-    Sleef_quad &operator[](size_t i) const { return data_[i * stride_]; }
+    const Sleef_quad &operator[](size_t i) const { return data_[i * stride_]; }
 
     size_t size() const { return size_; }
     size_t stride() const { return stride_; }
     Sleef_quad *data() { return data_; }
-    Sleef_quad *data() const { return data_; }
+    const Sleef_quad *data() const { return data_; }
 
     // Dot product
     Sleef_quad dot(const Vector &other) const
@@ -128,7 +128,7 @@ namespace QuadBLAS
       return layout == Layout::RowMajor ? data_[i * ld_ + j] : data_[j * ld_ + i];
     }
 
-    Sleef_quad &operator()(size_t i, size_t j) const
+    const Sleef_quad &operator()(size_t i, size_t j) const
     {
       return layout == Layout::RowMajor ? data_[i * ld_ + j] : data_[j * ld_ + i];
     }
@@ -137,7 +137,7 @@ namespace QuadBLAS
     size_t cols() const { return cols_; }
     size_t leading_dimension() const { return ld_; }
     Sleef_quad *data() { return data_; }
-    Sleef_quad *data() const { return data_; }
+    const Sleef_quad *data() const { return data_; }
 
     // Matrix-vector multiplication
     void gemv(Sleef_quad alpha, const Vector<layout> &x, Sleef_quad beta, Vector<layout> &y) const
