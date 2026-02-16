@@ -13,9 +13,13 @@
 namespace QuadBLAS
 {
 
+  // Micro-kernel tile sizes
+  constexpr size_t GEMM_MR = 4;
+  constexpr size_t GEMM_NR = 4;
+
   inline void gemm_micro_kernel_scalar(size_t mr, size_t nr, size_t kc,
                                        Sleef_quad alpha,
-                                       Sleef_quad *A_packed, Sleef_quad *B_packed,
+                                       const Sleef_quad *A_packed, const Sleef_quad *B_packed,
                                        Sleef_quad beta, Sleef_quad *C, size_t ldc)
   {
 
@@ -40,7 +44,7 @@ namespace QuadBLAS
 
   inline void gemm_micro_kernel_vectorized(size_t mr, size_t nr, size_t kc,
                                            Sleef_quad alpha,
-                                           Sleef_quad *A_packed, Sleef_quad *B_packed,
+                                           const Sleef_quad *A_packed, Sleef_quad *B_packed,
                                            Sleef_quad beta, Sleef_quad *C, size_t ldc)
   {
 
@@ -50,10 +54,10 @@ namespace QuadBLAS
       return;
     }
 
-    const size_t mr_vec = mr / VECTOR_SIZE;
     const size_t nr_vec = nr / VECTOR_SIZE;
 
-    Sleef_quad c_acc[mr][nr];
+    // Fixed-size accumulator (max GEMM_MR x GEMM_NR) - no VLA
+    Sleef_quad c_acc[GEMM_MR][GEMM_NR];
 
     for (size_t i = 0; i < mr; ++i)
     {
@@ -107,7 +111,7 @@ namespace QuadBLAS
 
   inline void gemm_micro_kernel(size_t mr, size_t nr, size_t kc,
                                 Sleef_quad alpha,
-                                Sleef_quad *A_packed, Sleef_quad *B_packed,
+                                const Sleef_quad *A_packed, Sleef_quad *B_packed,
                                 Sleef_quad beta, Sleef_quad *C, size_t ldc)
   {
 
@@ -123,24 +127,24 @@ namespace QuadBLAS
 
   inline void gemm_macro_kernel(size_t mc, size_t nc, size_t kc,
                                 Sleef_quad alpha,
-                                Sleef_quad *A_packed, Sleef_quad *B_packed,
+                                const Sleef_quad *A_packed, Sleef_quad *B_packed,
                                 Sleef_quad beta, Sleef_quad *C, size_t ldc)
   {
-    constexpr size_t MR = 4;
-    constexpr size_t NR = 4;
+    // Allocate B_sub once outside the loop instead of per-tile
+    Sleef_quad *B_sub = aligned_alloc<Sleef_quad>(kc * GEMM_NR);
+    const bool have_b_sub = (B_sub != nullptr);
 
-    for (size_t i = 0; i < mc; i += MR)
+    for (size_t i = 0; i < mc; i += GEMM_MR)
     {
-      size_t mr = std::min(MR, mc - i);
+      size_t mr = std::min(GEMM_MR, mc - i);
 
-      for (size_t j = 0; j < nc; j += NR)
+      for (size_t j = 0; j < nc; j += GEMM_NR)
       {
-        size_t nr = std::min(NR, nc - j);
+        size_t nr = std::min(GEMM_NR, nc - j);
 
-        Sleef_quad *B_sub = aligned_alloc<Sleef_quad>(kc * nr);
-        if (B_sub)
+        if (have_b_sub)
         {
-
+          // Repack B sub-tile into contiguous buffer
           for (size_t k = 0; k < kc; ++k)
           {
             for (size_t jj = 0; jj < nr; ++jj)
@@ -152,24 +156,38 @@ namespace QuadBLAS
           gemm_micro_kernel(mr, nr, kc, alpha,
                             &A_packed[i * kc], B_sub,
                             beta, &C[i * ldc + j], ldc);
-
-          aligned_free(B_sub);
         }
         else
         {
-
-          gemm_micro_kernel_scalar(mr, nr, kc, alpha,
-                                   &A_packed[i * kc], &B_packed[j],
-                                   beta, &C[i * ldc + j], ldc);
+          // Fallback: work directly on B_packed with stride
+          for (size_t ii = 0; ii < mr; ++ii)
+          {
+            for (size_t jj = 0; jj < nr; ++jj)
+            {
+              Sleef_quad sum = SLEEF_QUAD_C(0.0);
+              for (size_t k = 0; k < kc; ++k)
+              {
+                sum = Sleef_fmaq1_u05(A_packed[(i + ii) * kc + k],
+                                      B_packed[k * nc + (j + jj)], sum);
+              }
+              Sleef_quad c_old = C[(i + ii) * ldc + (j + jj)];
+              C[(i + ii) * ldc + (j + jj)] = Sleef_fmaq1_u05(alpha, sum, Sleef_mulq1_u05(beta, c_old));
+            }
+          }
         }
       }
+    }
+
+    if (have_b_sub)
+    {
+      aligned_free(B_sub);
     }
   }
 
   inline void gemm_simple(Layout layout, size_t m, size_t n, size_t k,
                           Sleef_quad alpha,
-                          Sleef_quad *A, size_t lda,
-                          Sleef_quad *B, size_t ldb,
+                          const Sleef_quad *A, size_t lda,
+                          const Sleef_quad *B, size_t ldb,
                           Sleef_quad beta, Sleef_quad *C, size_t ldc)
   {
 #ifdef _OPENMP
@@ -196,8 +214,8 @@ namespace QuadBLAS
 
   inline void gemm(Layout layout, size_t m, size_t n, size_t k,
                    Sleef_quad alpha,
-                   Sleef_quad *A, size_t lda,
-                   Sleef_quad *B, size_t ldb,
+                   const Sleef_quad *A, size_t lda,
+                   const Sleef_quad *B, size_t ldb,
                    Sleef_quad beta, Sleef_quad *C, size_t ldc)
   {
     if (m == 0 || n == 0 || k == 0)
@@ -227,29 +245,78 @@ namespace QuadBLAS
     {
       size_t kc = std::min(params.kc, k - kk);
 
-      for (size_t mm = 0; mm < m; mm += params.mc)
+      for (size_t nn = 0; nn < n; nn += params.nc)
       {
-        size_t mc = std::min(params.mc, m - mm);
+        size_t nc = std::min(params.nc, n - nn);
 
-        for (size_t i = 0; i < mc; ++i)
+        // Pack B panel once per (kk, nn) block
+        for (size_t i = 0; i < kc; ++i)
         {
-          for (size_t j = 0; j < kc; ++j)
+          for (size_t j = 0; j < nc; ++j)
           {
-            size_t src_idx = (layout == Layout::RowMajor) ? (mm + i) * lda + (kk + j) : (kk + j) * lda + (mm + i);
-            A_packed[i * kc + j] = A[src_idx];
+            size_t src_idx = (layout == Layout::RowMajor) ? (kk + i) * ldb + (nn + j) : (nn + j) * ldb + (kk + i);
+            B_packed[i * nc + j] = B[src_idx];
           }
         }
 
-        for (size_t nn = 0; nn < n; nn += params.nc)
+        // Iterate over row panels of A with OpenMP parallelism
+#ifdef _OPENMP
+#pragma omp parallel if (m >= PARALLEL_THRESHOLD)
         {
-          size_t nc = std::min(params.nc, n - nn);
-
-          for (size_t i = 0; i < kc; ++i)
+          // Each thread allocates its own A buffer once
+          Sleef_quad *A_local = nullptr;
+          bool multi_thread = (omp_get_num_threads() > 1);
+          if (multi_thread)
           {
-            for (size_t j = 0; j < nc; ++j)
+            A_local = aligned_alloc<Sleef_quad>(params.mc * kc);
+          }
+          else
+          {
+            A_local = A_packed;
+          }
+
+          if (A_local)
+          {
+#pragma omp for schedule(static)
+            for (size_t mm = 0; mm < m; mm += params.mc)
             {
-              size_t src_idx = (layout == Layout::RowMajor) ? (kk + i) * ldb + (nn + j) : (nn + j) * ldb + (kk + i);
-              B_packed[i * nc + j] = B[src_idx];
+              size_t mc = std::min(params.mc, m - mm);
+
+              // Pack A panel
+              for (size_t i = 0; i < mc; ++i)
+              {
+                for (size_t j = 0; j < kc; ++j)
+                {
+                  size_t src_idx = (layout == Layout::RowMajor) ? (mm + i) * lda + (kk + j) : (kk + j) * lda + (mm + i);
+                  A_local[i * kc + j] = A[src_idx];
+                }
+              }
+
+              Sleef_quad *C_block = &C[(layout == Layout::RowMajor) ? mm * ldc + nn : nn * ldc + mm];
+
+              gemm_macro_kernel(mc, nc, kc, alpha,
+                                A_local, B_packed,
+                                (kk == 0) ? beta : SLEEF_QUAD_C(1.0),
+                                C_block, ldc);
+            }
+          }
+
+          if (multi_thread && A_local)
+          {
+            aligned_free(A_local);
+          }
+        }
+#else
+        for (size_t mm = 0; mm < m; mm += params.mc)
+        {
+          size_t mc = std::min(params.mc, m - mm);
+
+          for (size_t i = 0; i < mc; ++i)
+          {
+            for (size_t j = 0; j < kc; ++j)
+            {
+              size_t src_idx = (layout == Layout::RowMajor) ? (mm + i) * lda + (kk + j) : (kk + j) * lda + (mm + i);
+              A_packed[i * kc + j] = A[src_idx];
             }
           }
 
@@ -260,6 +327,7 @@ namespace QuadBLAS
                             (kk == 0) ? beta : SLEEF_QUAD_C(1.0),
                             C_block, ldc);
         }
+#endif
       }
     }
 
