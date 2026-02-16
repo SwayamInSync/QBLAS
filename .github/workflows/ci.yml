@@ -23,7 +23,7 @@ jobs:
 
       - name: Build SLEEF
         run: |
-          git clone --branch 3.9 --depth 1 https://github.com/shibatch/sleef.git
+          git clone --branch 3.9.0 --depth 1 https://github.com/shibatch/sleef.git
           cd sleef
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -80,7 +80,7 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
-          git clone --branch 3.9 --depth 1 https://github.com/shibatch/sleef.git
+          git clone --branch 3.9.0 --depth 1 https://github.com/shibatch/sleef.git
           cd sleef
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
