@@ -2,7 +2,7 @@ name: QuadBLAS Testing
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   workflow_dispatch:
 
@@ -23,9 +23,16 @@ jobs:
 
       - name: Build SLEEF
         run: |
-          git clone --branch 3.8 --depth 1 https://github.com/shibatch/sleef.git
+          git clone --branch 3.9 --depth 1 https://github.com/shibatch/sleef.git
           cd sleef
-          cmake -S . -B build -DSLEEF_BUILD_QUAD=ON -DSLEEF_BUILD_SHARED_LIBS=ON
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSLEEF_BUILD_QUAD=ON \
+            -DSLEEF_BUILD_SHARED_LIBS=ON \
+            -DSLEEF_BUILD_TESTS=OFF \
+            -DSLEEF_BUILD_INLINE_HEADERS=OFF \
+            -DSLEEF_ENABLE_TLFLOAT=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build build --parallel $(nproc)
           sudo cmake --install build --prefix /usr/local
 
@@ -73,11 +80,15 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
-          git clone --branch 3.8 --depth 1 https://github.com/shibatch/sleef.git
+          git clone --branch 3.9 --depth 1 https://github.com/shibatch/sleef.git
           cd sleef
           cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
             -DSLEEF_BUILD_QUAD=ON \
             -DSLEEF_BUILD_SHARED_LIBS=ON \
+            -DSLEEF_BUILD_TESTS=OFF \
+            -DSLEEF_BUILD_INLINE_HEADERS=OFF \
+            -DSLEEF_ENABLE_TLFLOAT=OFF \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DCMAKE_INSTALL_RPATH="@loader_path/../lib" \
