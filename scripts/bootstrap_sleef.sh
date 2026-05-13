@@ -31,16 +31,28 @@ cmake -S "${sleef_src}" -B "${sleef_build}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${prefix}"
 
-cmake --build "${sleef_build}" --parallel "$(nproc 2>/dev/null || echo 4)"
+if command -v nproc >/dev/null 2>&1; then
+    NJOBS=$(nproc)
+elif [[ "$(uname)" == "Darwin" ]]; then
+    NJOBS=$(sysctl -n hw.ncpu)
+else
+    NJOBS=4
+fi
+cmake --build "${sleef_build}" --parallel "${NJOBS}"
 
 rm -rf "${prefix}"
 cmake --install "${sleef_build}"
 
 # SLEEF's install rules don't include the vendored libtlfloat artifact; copy
-# it manually so binaries can load it via rpath.
+# it manually so binaries can load it via rpath/runpath.
 tl_dir="${sleef_build}/ext_tlfloat-prefix/src/ext_tlfloat-build/lib"
 if [[ -d "${tl_dir}" ]]; then
-    cp -a "${tl_dir}"/libtlfloat.so* "${prefix}/lib/"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        cp -a "${tl_dir}"/libtlfloat.*.dylib "${prefix}/lib/" 2>/dev/null || true
+        cp -a "${tl_dir}"/libtlfloat.dylib   "${prefix}/lib/" 2>/dev/null || true
+    else
+        cp -a "${tl_dir}"/libtlfloat.so* "${prefix}/lib/"
+    fi
 fi
 
 echo "[bootstrap] SLEEF installed at ${prefix}"

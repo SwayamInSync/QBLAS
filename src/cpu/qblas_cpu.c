@@ -388,21 +388,29 @@ int qblas_get_max_threads(void) {
 /* Decide how many threads to actually use for a piece of work.  Avoids
  * paying parallel-region overhead when the work is too small.
  *
- * Quad ops are heavy: each SLEEF quad FMA is ~30 cycles of software DD
- * math, so even short loops have non-trivial total cycle counts and
- * benefit from threading.  We multiply the caller's abstract "ops" by
- * an expected cycles-per-quad-op estimate before comparing to the
- * fork/join overhead. */
+ * The measured `omp_overhead_cycles` is what one *empty* parallel region
+ * costs when spawning all available threads.  For a parallel region to
+ * be a net win every thread must have at least `omp_overhead_cycles` of
+ * useful work to do.  So:
+ *
+ *    per_thread_work_cycles >= overhead   ⇒  threaded
+ *    work_cycles / n_threads >= overhead  ⇒  n_threads <= work / overhead
+ *
+ * That naturally yields fewer threads on small problems even on big
+ * machines, instead of always picking `max_threads` and paying for it. */
 int qblas_resolve_threads(size_t work_units, size_t per_unit_cost) {
 #ifdef _OPENMP
     int max = omp_get_max_threads();
     if (max <= 1) return 1;
     if (per_unit_cost == 0) per_unit_cost = 1;
-    const size_t quad_cycles_per_op = 32;     /* SLEEF q4 FMA cost */
-    const size_t fork_join_cycles   = 8192;   /* approx OMP parallel-region */
+    const size_t quad_cycles_per_op = 32;
+    size_t overhead = g_tune.omp_overhead_cycles;
+    if (overhead < 1024) overhead = 1024;
     size_t total_cycles = work_units * per_unit_cost * quad_cycles_per_op;
-    if (total_cycles < fork_join_cycles * 2) return 1;
-    size_t t = total_cycles / fork_join_cycles;
+    if (total_cycles < overhead * 2) return 1;
+    /* Pick the number of threads where each one gets ≥ overhead worth of
+     * work.  This caps `t` automatically on big machines for small jobs. */
+    size_t t = total_cycles / overhead;
     if ((int)t > max) t = (size_t)max;
     if (g_user_thread_cap && (int)t > g_user_thread_cap) t = (size_t)g_user_thread_cap;
     if (t < 1) t = 1;

@@ -80,7 +80,9 @@ endif()
 set(CMAKE_INSTALL_RPATH "${SLEEF_ROOT}/lib")
 set(CMAKE_BUILD_RPATH   "${SLEEF_ROOT}/lib")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+# --disable-new-dtags is a GNU-ld feature; macOS (ld64) has @rpath semantics
+# that already propagate, so we only emit it on ELF platforms.
+if((CMAKE_C_COMPILER_ID MATCHES "GNU|Clang") AND NOT APPLE)
     add_link_options(-Wl,--disable-new-dtags)
 endif()
 

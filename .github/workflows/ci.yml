@@ -1,16 +1,96 @@
-name: QuadBLAS Testing
+name: QBLAS CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, overhaul-rewrite]
   pull_request:
   workflow_dispatch:
 
-jobs:
-  test-ubuntu:
-    name: Test Ubuntu
-    runs-on: ubuntu-latest
+# We test on Ubuntu (gcc + clang) and macOS (clang), all matrix entries
+# run the same: build SLEEF via scripts/bootstrap_sleef.sh, build qblas,
+# run ctest.  No platform-specific behaviour is needed because both the
+# bootstrap and the qblas CMake auto-detect cache sizes, ISA flags, and
+# OpenMP at configure time.
 
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.compiler }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+          - os: ubuntu-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+          - os: macos-14
+            compiler: clang
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential libomp-dev
+          if [ "${{ matrix.compiler }}" = "clang" ]; then
+            sudo apt-get install -y clang libomp-dev
+          fi
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja libomp
+
+      - name: Build SLEEF with full SIMD coverage
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          bash scripts/bootstrap_sleef.sh
+
+      - name: Configure qblas
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build qblas + tests + bench
+        run: cmake --build build --parallel
+
+      - name: Run correctness tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke-run the benchmark (small problem sizes)
+        run: |
+          ./build/bench/qblas_bench --benchmark_min_time=0.05s \
+            --benchmark_filter='BM_qdot/1024|BM_qaxpy/1024|BM_qgemm/64'
+
+      - name: Force-test each dispatch tier (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          for tier in generic sse2 avx2; do
+            echo "==== Testing tier: $tier ===="
+            QBLAS_DISPATCH=$tier ctest --test-dir build --output-on-failure
+          done
+
+  bench-baseline:
+    # Run benchmarks on Linux gcc only and post results as an artifact for
+    # tracking perf-regression over time.  Doesn't gate on pass/fail.
+    name: benchmark / ubuntu-gcc
+    runs-on: ubuntu-latest
+    needs: test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,97 +99,32 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libomp-dev
+          sudo apt-get install -y cmake ninja-build build-essential libomp-dev
 
       - name: Build SLEEF
-        run: |
-          git clone --branch 3.8 --depth 1 https://github.com/shibatch/sleef.git
-          cd sleef
-          cmake -S . -B build -DSLEEF_BUILD_QUAD=ON -DSLEEF_BUILD_SHARED_LIBS=ON
-          cmake --build build --parallel $(nproc)
-          sudo cmake --install build --prefix /usr/local
+        run: bash scripts/bootstrap_sleef.sh
 
-      - name: Build QuadBLAS
-        env:
-          SLEEF_ROOT: /usr/local
+      - name: Build qblas
         run: |
-          mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(nproc)
-
-      - name: Run tests
-        run: |
-          cd build
-          ./quadblas_test
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
 
       - name: Run benchmarks
         run: |
-          cd build
-          if [ -f "./quadblas_benchmark" ]; then
-            echo "Running Google Benchmark tests..."
-            ./quadblas_benchmark --benchmark_min_time=0.1s --benchmark_filter="BM_DotProduct|BM_AXPY|BM_VectorNorm"
-          else
-            echo "Google Benchmark not available, running legacy benchmark..."
-            ./quadblas_benchmark_legacy
-          fi
+          mkdir -p bench-results
+          OMP_NUM_THREADS=$(nproc) OMP_PLACES=cores OMP_PROC_BIND=close \
+              ./build/bench/qblas_bench_compare \
+              --benchmark_min_time=0.2s \
+              --benchmark_repetitions=3 \
+              --benchmark_report_aggregates_only=true \
+              --benchmark_format=json > bench-results/qblas_bench.json
+          ./build/bench/qblas_bench_compare \
+              --benchmark_min_time=0.2s \
+              --benchmark_repetitions=3 \
+              --benchmark_report_aggregates_only=true | tee bench-results/qblas_bench.txt
 
-  test-macos:
-    name: Test macOS ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-14, macos-15]
-
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
         with:
-          submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          brew install cmake libomp
-
-      - name: Install SLEEF
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
-        run: |
-          git clone --branch 3.8 --depth 1 https://github.com/shibatch/sleef.git
-          cd sleef
-          cmake -S . -B build \
-            -DSLEEF_BUILD_QUAD=ON \
-            -DSLEEF_BUILD_SHARED_LIBS=ON \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DCMAKE_INSTALL_RPATH="@loader_path/../lib" \
-            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
-          cmake --build build --clean-first -j
-          sudo cmake --install build --prefix /usr/local
-
-      - name: Build QuadBLAS
-        env:
-          SLEEF_ROOT: /usr/local
-          DYLD_LIBRARY_PATH: "/usr/local/lib:$DYLD_LIBRARY_PATH"
-        run: |
-          mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ..
-          make -j$(sysctl -n hw.ncpu)
-
-      - name: Run tests
-        env:
-          DYLD_LIBRARY_PATH: "/usr/local/lib:$DYLD_LIBRARY_PATH"
-        run: |
-          cd build
-          ./quadblas_test
-
-      - name: Run benchmarks
-        env:
-          DYLD_LIBRARY_PATH: "/usr/local/lib:$DYLD_LIBRARY_PATH"
-        run: |
-          cd build
-          if [ -f "./quadblas_benchmark" ]; then
-            echo "Running Google Benchmark tests..."
-            ./quadblas_benchmark --benchmark_min_time=0.1s --benchmark_filter="BM_DotProduct|BM_AXPY|BM_VectorNorm"
-          else
-            echo "Google Benchmark not available, running legacy benchmark..."
-            ./quadblas_benchmark_legacy
-          fi
+          name: qblas-bench-results
+          path: bench-results/
+          retention-days: 30
