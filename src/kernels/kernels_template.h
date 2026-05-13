@@ -392,18 +392,29 @@ static void QV_FN(qgemv_t)(size_t m, size_t k,
  * This keeps register pressure bounded and the kernel symmetric.
  * =================================================================== */
 
+/* Register-tile shape per width.
+ *
+ * For ILP we want enough independent accumulators to hide the FMA latency
+ * (each quad FMA is ~30 cycles of internal DD math).  More accumulators
+ * also mean more state but better instruction-level overlap.  Empirically:
+ *
+ *   width 1: MR×NR = 4×4 = 16 scalar acc
+ *   width 2: MR×NR = 4×4 = 8 vector acc (2 vec per row)
+ *   width 4: MR×NR = 4×8 = 8 vector acc (2 vec per row, NR_VEC=2)
+ *   width 8: MR×NR = 4×8 = 4 vector acc (1 vec per row, NR_VEC=1)
+ */
 #if QV_WIDTH == 1
 #  define QV_MR 4
 #  define QV_NR 4
 #elif QV_WIDTH == 2
 #  define QV_MR 4
-#  define QV_NR 4   /* 2 qv_t per row */
+#  define QV_NR 4   /* NR_VEC=2 → 8 acc */
 #elif QV_WIDTH == 4
 #  define QV_MR 4
-#  define QV_NR 4   /* 1 qv_t per row */
+#  define QV_NR 4   /* NR_VEC=1 → 4 acc; bigger tile (NR=8) is L1-pressure bound */
 #elif QV_WIDTH == 8
 #  define QV_MR 4
-#  define QV_NR 8   /* 1 qv_t per row */
+#  define QV_NR 8   /* NR_VEC=1 → 4 acc */
 #endif
 
 static void QV_FN(qgemm_kernel)(size_t kc,
@@ -419,19 +430,12 @@ static void QV_FN(qgemm_kernel)(size_t kc,
     qv_t c30 = QV_SPLAT(QBLAS_ZERO), c31 = QV_SPLAT(QBLAS_ZERO);
     (void)c01; (void)c11; (void)c21; (void)c31;
 
-    /* A is packed MR=4 columns of kc.  Stride between successive A-elements
-     * within a k iteration is MR=4 (one block of MR scalars per k). */
     for (size_t p = 0; p < kc; ++p) {
-        /* B packed row of NR scalars at this k step. */
         qv_t b0 = QV_LOADU(B_packed + p * QV_NR + 0 * W);
-        Sleef_quad a0 = A_packed[p * QV_MR + 0];
-        Sleef_quad a1 = A_packed[p * QV_MR + 1];
-        Sleef_quad a2 = A_packed[p * QV_MR + 2];
-        Sleef_quad a3 = A_packed[p * QV_MR + 3];
-        qv_t va0 = QV_SPLAT(a0);
-        qv_t va1 = QV_SPLAT(a1);
-        qv_t va2 = QV_SPLAT(a2);
-        qv_t va3 = QV_SPLAT(a3);
+        qv_t va0 = QV_SPLAT(A_packed[p * QV_MR + 0]);
+        qv_t va1 = QV_SPLAT(A_packed[p * QV_MR + 1]);
+        qv_t va2 = QV_SPLAT(A_packed[p * QV_MR + 2]);
+        qv_t va3 = QV_SPLAT(A_packed[p * QV_MR + 3]);
         c00 = QV_FMA(va0, b0, c00);
         c10 = QV_FMA(va1, b0, c10);
         c20 = QV_FMA(va2, b0, c20);
@@ -445,40 +449,16 @@ static void QV_FN(qgemm_kernel)(size_t kc,
         }
     }
 
-    /* Scale by alpha and add into C (which already holds beta*C from the
-     * caller). */
     qv_t va = QV_SPLAT(alpha);
-    {
-        qv_t y0 = QV_LOADU(C + 0 * ldc + 0 * W);
-        QV_STOREU(C + 0 * ldc + 0 * W, QV_FMA(va, c00, y0));
-        if (NR_VEC > 1) {
-            qv_t y1 = QV_LOADU(C + 0 * ldc + 1 * W);
-            QV_STOREU(C + 0 * ldc + 1 * W, QV_FMA(va, c01, y1));
-        }
-    }
-    {
-        qv_t y0 = QV_LOADU(C + 1 * ldc + 0 * W);
-        QV_STOREU(C + 1 * ldc + 0 * W, QV_FMA(va, c10, y0));
-        if (NR_VEC > 1) {
-            qv_t y1 = QV_LOADU(C + 1 * ldc + 1 * W);
-            QV_STOREU(C + 1 * ldc + 1 * W, QV_FMA(va, c11, y1));
-        }
-    }
-    {
-        qv_t y0 = QV_LOADU(C + 2 * ldc + 0 * W);
-        QV_STOREU(C + 2 * ldc + 0 * W, QV_FMA(va, c20, y0));
-        if (NR_VEC > 1) {
-            qv_t y1 = QV_LOADU(C + 2 * ldc + 1 * W);
-            QV_STOREU(C + 2 * ldc + 1 * W, QV_FMA(va, c21, y1));
-        }
-    }
-    {
-        qv_t y0 = QV_LOADU(C + 3 * ldc + 0 * W);
-        QV_STOREU(C + 3 * ldc + 0 * W, QV_FMA(va, c30, y0));
-        if (NR_VEC > 1) {
-            qv_t y1 = QV_LOADU(C + 3 * ldc + 1 * W);
-            QV_STOREU(C + 3 * ldc + 1 * W, QV_FMA(va, c31, y1));
-        }
+    QV_STOREU(C + 0 * ldc + 0 * W, QV_FMA(va, c00, QV_LOADU(C + 0 * ldc + 0 * W)));
+    QV_STOREU(C + 1 * ldc + 0 * W, QV_FMA(va, c10, QV_LOADU(C + 1 * ldc + 0 * W)));
+    QV_STOREU(C + 2 * ldc + 0 * W, QV_FMA(va, c20, QV_LOADU(C + 2 * ldc + 0 * W)));
+    QV_STOREU(C + 3 * ldc + 0 * W, QV_FMA(va, c30, QV_LOADU(C + 3 * ldc + 0 * W)));
+    if (NR_VEC > 1) {
+        QV_STOREU(C + 0 * ldc + 1 * W, QV_FMA(va, c01, QV_LOADU(C + 0 * ldc + 1 * W)));
+        QV_STOREU(C + 1 * ldc + 1 * W, QV_FMA(va, c11, QV_LOADU(C + 1 * ldc + 1 * W)));
+        QV_STOREU(C + 2 * ldc + 1 * W, QV_FMA(va, c21, QV_LOADU(C + 2 * ldc + 1 * W)));
+        QV_STOREU(C + 3 * ldc + 1 * W, QV_FMA(va, c31, QV_LOADU(C + 3 * ldc + 1 * W)));
     }
 #else
     /* Scalar fallback: 4x4 tile, accumulate then alpha*acc + C. */

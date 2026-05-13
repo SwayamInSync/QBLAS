@@ -46,10 +46,18 @@
 #endif
 
 /* ---- Default cache-blocking parameters.
- *      Tuned for: 32KB L1d, 256KB-1MB L2, 8MB+ L3.  Multiples of MR/NR. */
+ *      kc: chosen so that the MR x kc panel of A_packed + kc x NR slice of B
+ *          fit in L1 (with room for the C tile).
+ *      mc: chosen so that mc x kc panel of A_packed fits in L2.
+ *      nc: chosen as a function of the number of threads — see qgemm() — so
+ *          every thread gets ≥ 1 jc-block.  This constant is a *ceiling*.
+ *
+ *      Quad is 16 bytes per element so memory pressure is 2× double.  For
+ *      a typical 32KB L1, kc * (MR + NR) * 16 ≤ L1/2 → kc ≲ 128 for MR=NR=4.
+ *      For a 512KB L2, mc * kc * 16 ≤ L2/2 → mc ≲ 128 at kc=128. */
 #define QBLAS_KC_DEFAULT  128
 #define QBLAS_MC_DEFAULT  128
-#define QBLAS_NC_DEFAULT  1024
+#define QBLAS_NC_DEFAULT  512
 
 /* ---------------- Row-major view helpers ----------------------------
  * We model A and B as virtual row-major matrices once transposes are
@@ -264,6 +272,18 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
     size_t nc = QBLAS_NC_DEFAULT;
     if (kc > kk) kc = kk;
     if (mc > mm) mc = mm;
+
+    int nthreads = qblas_resolve_threads(mm * nn, kk);
+    if (nthreads < 1) nthreads = 1;
+
+    /* Scale nc down so every thread gets ≥ 1 jc-block.  We aim for at least
+     * 2 blocks per thread to allow scheduling slack. */
+    if (nthreads > 1) {
+        size_t target_blocks = (size_t)nthreads * 2;
+        size_t max_nc_per_block = (nn + target_blocks - 1) / target_blocks;
+        if (max_nc_per_block < nc) nc = max_nc_per_block;
+        if (nc < NR) nc = NR;  /* never smaller than one register tile */
+    }
     if (nc > nn) nc = nn;
     size_t mc_pad = ((mc + MR - 1) / MR) * MR;
     size_t nc_pad = ((nc + NR - 1) / NR) * NR;
@@ -271,8 +291,9 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
     size_t Bp_size = kc * nc_pad;
     size_t Ap_size = mc_pad * kc;
 
-    int nthreads = qblas_resolve_threads(mm * nn, kk);
-    if (nthreads < 1) nthreads = 1;
+    /* Enumerate jc-blocks so we can hand each one to a thread.  Each
+     * block i covers [i*nc, min((i+1)*nc, nn)). */
+    size_t njc = (nn + nc - 1) / nc;
 
 #ifdef _OPENMP
     #pragma omp parallel num_threads(nthreads)
@@ -281,16 +302,11 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
         Sleef_quad *Ap = (Sleef_quad *)qblas_aligned_alloc(Ap_size * sizeof(Sleef_quad));
         Sleef_quad *Bp = (Sleef_quad *)qblas_aligned_alloc(Bp_size * sizeof(Sleef_quad));
 
-        /* Each thread owns a strided slice of jc.  Static schedule over
-         * jc-chunks of size nc keeps each thread on contiguous C columns. */
 #ifdef _OPENMP
-        int tid = omp_get_thread_num();
-        int nt  = omp_get_num_threads();
-#else
-        int tid = 0, nt = 1;
+        #pragma omp for schedule(dynamic)
 #endif
-
-        for (size_t jc = (size_t)tid * nc; jc < nn; jc += (size_t)nt * nc) {
+        for (size_t b = 0; b < njc; ++b) {
+            size_t jc = b * nc;
             size_t nc_use = (jc + nc <= nn) ? nc : (nn - jc);
             size_t nc_use_pad = ((nc_use + NR - 1) / NR) * NR;
 

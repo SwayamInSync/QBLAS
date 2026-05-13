@@ -73,46 +73,25 @@ void cblas_qgemv(QBLAS_LAYOUT layout, QBLAS_TRANSPOSE trans,
         int nthreads = qblas_resolve_threads(rm_rows * rm_cols, 1);
         if (nthreads > 1 && rm_rows * rm_cols >= QBLAS_PARALLEL_THRESHOLD_GEMV) {
 #ifdef _OPENMP
-            /* gemv_t accumulates into y; we partition over k (columns of A,
-             * = rows of A^T = output of gemv_t).  But k is the output.
-             * Simplest correct parallelisation: split along m (input axis).
-             * Each thread does its own gemv_t into a private buffer, then we
-             * sum.  Skip threading here for simplicity unless m is huge. */
-            if (rm_rows >= 4096) {
-                size_t y_bytes = y_len * sizeof(Sleef_quad);
-                Sleef_quad **partials = (Sleef_quad **)qblas_aligned_alloc(nthreads * sizeof(void*));
-                for (int t = 0; t < nthreads; ++t) {
-                    partials[t] = (Sleef_quad *)qblas_aligned_alloc(y_bytes);
-                    for (size_t j = 0; j < y_len; ++j) partials[t][j] = QBLAS_ZERO;
-                }
-                #pragma omp parallel num_threads(nthreads)
-                {
-                    int tid = omp_get_thread_num();
-                    int nt  = omp_get_num_threads();
-                    size_t chunk = rm_rows / nt;
-                    size_t rem   = rm_rows % nt;
-                    size_t start = (size_t)tid * chunk + (tid < (int)rem ? (size_t)tid : rem);
-                    size_t cnt   = chunk + (tid < (int)rem ? 1u : 0u);
-                    qblas_dispatch_qgemv_t(cnt, rm_cols,
-                                           QBLAS_ONE,
-                                           A + start * (size_t)lda, (size_t)lda,
-                                           x + ox + (ptrdiff_t)start * incx, incx,
-                                           QBLAS_ZERO,
-                                           partials[tid], 1);
-                }
-                /* Combine: y = alpha * sum(partials) + beta*y */
-                Sleef_quad *yp = y + oy;
-                for (size_t j = 0; j < y_len; ++j) {
-                    Sleef_quad s = QBLAS_ZERO;
-                    for (int t = 0; t < nthreads; ++t) s = qadd(s, partials[t][j]);
-                    Sleef_quad scaled = qmul(alpha, s);
-                    if (qiszero(beta)) yp[(ptrdiff_t)j * incy] = scaled;
-                    else yp[(ptrdiff_t)j * incy] = qfma(beta, yp[(ptrdiff_t)j * incy], scaled);
-                }
-                for (int t = 0; t < nthreads; ++t) qblas_aligned_free(partials[t]);
-                qblas_aligned_free(partials);
-                return;
+            /* gemv_t output y has length rm_cols.  We can parallelise along
+             * rm_cols by treating each column of A^T as an independent dot
+             * product against x — that is, dot of column j of A with x.
+             *
+             * The kernel-side gemv_t walks over rows of A doing an axpy into
+             * y, which doesn't decompose by j cleanly without a private y
+             * buffer.  Easier: do a parallel for over j, computing each y[j]
+             * by dotting A[:, j] (a strided column) with x. */
+            #pragma omp parallel for num_threads(nthreads) schedule(static)
+            for (size_t j = 0; j < y_len; ++j) {
+                Sleef_quad s = qblas_dispatch_qdot(rm_rows,
+                                                   A + j, (ptrdiff_t)lda,
+                                                   x + ox, (ptrdiff_t)incx);
+                Sleef_quad scaled = qmul(alpha, s);
+                if (qiszero(beta)) y[oy + (ptrdiff_t)j * incy] = scaled;
+                else y[oy + (ptrdiff_t)j * incy] =
+                        qfma(beta, y[oy + (ptrdiff_t)j * incy], scaled);
             }
+            return;
 #endif
         }
         qblas_dispatch_qgemv_t(rm_rows, rm_cols, alpha, A, (size_t)lda,
