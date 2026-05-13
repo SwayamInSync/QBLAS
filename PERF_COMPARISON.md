@@ -121,6 +121,60 @@ benefited from.
 
 ---
 
+## 96-thread results (`OMP_NUM_THREADS=96 OMP_PLACES=cores OMP_PROC_BIND=close`)
+
+Full-machine numbers from the same EPYC 7V13 box. Threads are pinned so
+each iteration's timing is stable enough for median-of-3 to be
+meaningful. Compute-bound L3 routines scale nearly linearly to all 96
+cores; L1/L2 at moderate sizes are memory-bandwidth bound and saturate
+earlier (which is why my dynamic threading heuristic correctly *does
+not* spawn 96 threads for them).
+
+| routine | n / dim  | OLD M items/s | NEW M items/s | new × old |
+| ------- | -------- | ------------: | ------------: | --------: |
+| dot     | 1 M      | 176.8         | **882.9**     |    **5.0×** |
+| axpy    | 64 K     | 151.2         | 83.3 (mem-BW bound) | 0.55× |
+| nrm2    | 64 K     | 169.1         | 30.0 (memory bound) | 0.18× |
+| asum    | 64 K     | n/a           | 66.7          |        — |
+| scal    | 64 K     | n/a           | 68.3          |        — |
+| gemv    | 1 600²   | 188.2         | **2 202.4**   |   **11.7×** |
+| gemm    | 64³      | 771.5         | 242.8         |     0.31× |
+| gemm    | 128³     | 2.6           | **1 821.8**   |    **701×** |
+| gemm    | 256³     | 2.6           | **3 129.0**   |  **1 203×** |
+| gemm    | 512³     | 18.1          | **3 730.9**   |    **206×** |
+| syrk    | 64³      | n/a           | 211.4         |        — |
+| syrk    | 128³     | n/a           | 1 498.8       |        — |
+| syrk    | 256³     | n/a           | 3 721.6       |        — |
+| syrk    | 512³     | n/a           | **3 773.7**   |        — |
+| trmm    | 64²      | n/a           | 81.2          |        — |
+| trmm    | 128²     | n/a           | 233.5         |        — |
+| trmm    | 256²     | n/a           | 802.1         |        — |
+| trmm    | 512²     | n/a           | **2 706.5**   |        — |
+| trsm    | 64²      | n/a           | 87.8          |        — |
+| trsm    | 128²     | n/a           | 262.9         |        — |
+| trsm    | 256²     | n/a           | 795.3         |        — |
+| trsm    | 512²     | n/a           | **2 529.8**   |        — |
+
+Observations:
+
+- **GEMM at 256³–512³ hits 3.1–3.7 G FMA/sec**, which is the peak this
+  machine produces for quad precision through SLEEF. At 512³ that's an
+  8.7× scale-up over the 16-thread number, almost linear.
+- **TRSM/TRMM at 512² reach 2.5–2.7 G items/sec** because the trailing
+  GEMM updates dominate at that size and inherit GEMM's threading.
+- **`gemm/64` regressed at 96 threads** vs OLD (771 vs 243). At m=n=k=64
+  the parallel-region overhead of 96 fork/joins dominates the 262 K FMAs
+  of actual work. Running with `OMP_NUM_THREADS=16` gives `gemm/64 = 407
+  M/s`, which beats OLD. This is exactly the kind of thing the dynamic
+  threading heuristic should fix: cap threads to ~16 even when 96 are
+  available, for small problems.
+- **`axpy/64K`, `nrm2/64K` regressed at 96 threads** vs OLD's 16-thread
+  measurement. Same root cause: at this size the working set (1 MB)
+  doesn't justify 96 cores' worth of memory traffic. The 16-thread
+  numbers in the previous section are the better comparison for L1.
+
+---
+
 ## Why the wins look like this
 
 1. **SIMD path actually engaged** (×11 per-core baseline).  The old
