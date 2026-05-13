@@ -90,4 +90,52 @@ static void BM_GEMM(benchmark::State &state) {
 }
 BENCHMARK(BM_GEMM)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
 
+/* ---- SYRK sizes: 64, 128, 256, 512 ---- */
+static void BM_SYRK(benchmark::State &state) {
+    size_t n = static_cast<size_t>(state.range(0));
+    size_t k = n;
+    std::vector<Sleef_quad> A(n*k), C(n*n);
+    fill_random(A, 1); fill_random(C, 3);
+    Sleef_quad alpha = qd(1.0), beta = qd(0.0);
+    for (auto _ : state) {
+        cblas_qsyrk(QblasRowMajor, QblasUpper, QblasNoTrans, n, k,
+                    alpha, A.data(), k, beta, C.data(), n);
+        benchmark::DoNotOptimize(C.data());
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(n * n * k));
+}
+BENCHMARK(BM_SYRK)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
+
+/* ---- TRMM sizes: B is m x n square ---- */
+static void BM_TRMM(benchmark::State &state) {
+    size_t m = static_cast<size_t>(state.range(0)), n = m;
+    std::vector<Sleef_quad> A(m*m), B(m*n);
+    fill_random(A, 1); fill_random(B, 2);
+    Sleef_quad alpha = qd(1.0);
+    for (auto _ : state) {
+        cblas_qtrmm(QblasRowMajor, QblasLeft, QblasLower, QblasNoTrans, QblasNonUnit,
+                    m, n, alpha, A.data(), m, B.data(), n);
+        benchmark::DoNotOptimize(B.data());
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(m * m * n / 2));
+}
+BENCHMARK(BM_TRMM)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
+
+/* ---- TRSM sizes ---- */
+static void BM_TRSM(benchmark::State &state) {
+    size_t m = static_cast<size_t>(state.range(0)), n = m;
+    std::vector<Sleef_quad> A(m*m), B(m*n), B0(m*n);
+    fill_random(A, 1); fill_random(B0, 2);
+    for (size_t i = 0; i < m; ++i) A[i*m+i] = qd(2.0 + (double)i*0.001);
+    Sleef_quad alpha = qd(1.0);
+    for (auto _ : state) {
+        std::copy(B0.begin(), B0.end(), B.begin());
+        cblas_qtrsm(QblasRowMajor, QblasLeft, QblasLower, QblasNoTrans, QblasNonUnit,
+                    m, n, alpha, A.data(), m, B.data(), n);
+        benchmark::DoNotOptimize(B.data());
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(m * m * n / 2));
+}
+BENCHMARK(BM_TRSM)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
+
 BENCHMARK_MAIN();

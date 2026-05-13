@@ -108,19 +108,25 @@ static void trsm_left_diag(QBLAS_LAYOUT layout, QBLAS_UPLO uplo,
                            size_t row_off) {
     int doT = (transa == QblasTrans || transa == QblasConjTrans);
     int upper = (uplo == QblasUpper);
-    int eff_upper = doT ? !upper : upper;  /* direction post-transpose */
+    int eff_upper = doT ? !upper : upper;
     int unit = (diag == QblasUnit);
 
-    /* Forward (lower) or back (upper) substitution. */
     int step = eff_upper ? -1 : 1;
     int i_start = eff_upper ? bs - 1 : 0;
     int i_end   = eff_upper ? -1     : bs;
 
-    for (int i = i_start; i != i_end; i += step) {
-        /* Subtract previously solved rows from B[i, :]. */
-        int k_start = eff_upper ? i + 1 : 0;
-        int k_end   = eff_upper ? bs    : i;
-        for (int j = 0; j < n; ++j) {
+    /* The columns of B (j-loop) are independent triangular solves against
+     * the same diagonal block.  Hand them to OpenMP — each thread chases
+     * its own column down/up the bs rows.  This converts the kernel from
+     * O(bs²·n) scalar work into O(bs²·n / threads). */
+    int nthreads = qblas_resolve_threads((size_t)bs * (size_t)n, (size_t)bs);
+#ifdef _OPENMP
+    #pragma omp parallel for num_threads(nthreads) schedule(static)
+#endif
+    for (int j = 0; j < n; ++j) {
+        for (int i = i_start; i != i_end; i += step) {
+            int k_start = eff_upper ? i + 1 : 0;
+            int k_end   = eff_upper ? bs    : i;
             Sleef_quad rhs = *B_at(B, ldb, layout, row_off + (size_t)i, (size_t)j);
             for (int k = k_start; k < k_end; ++k) {
                 Sleef_quad aik = doT
@@ -153,6 +159,10 @@ static void trmm_left_diag(QBLAS_LAYOUT layout, QBLAS_UPLO uplo,
     int eff_upper = doT ? !upper : upper;
     int unit  = (diag == QblasUnit);
 
+    int nthreads = qblas_resolve_threads((size_t)bs * (size_t)n, (size_t)bs);
+#ifdef _OPENMP
+    #pragma omp parallel for num_threads(nthreads) schedule(static)
+#endif
     for (int j = 0; j < n; ++j) {
         if (eff_upper) {
             /* Each row i = 0..bs-1 reads rows k >= i.  Walk top→bottom. */
