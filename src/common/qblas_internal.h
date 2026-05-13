@@ -82,11 +82,42 @@ QBLAS_API qblas_cpu_tier_t qblas_cpu_tier(void);
  * --------------------------------------------------------------------- */
 int qblas_resolve_threads(size_t work_units, size_t per_unit_cost);
 
-/* Threshold tuning (in elements / FLOPs).  These are starting points;
- * benchmarks will refine. */
-#define QBLAS_PARALLEL_THRESHOLD_L1   8192      /* vector ops */
-#define QBLAS_PARALLEL_THRESHOLD_GEMV 4096      /* m * n total elements */
-#define QBLAS_PARALLEL_THRESHOLD_GEMM 64        /* min dim for threading */
+/* -----------------------------------------------------------------------
+ * Hardware-derived tunables.
+ *
+ * Populated once at library init by qblas_dispatch_init() from CPUID
+ * cache descriptors (x86) / sysconf (POSIX).  All callers read the
+ * runtime values, never the compile-time defaults.
+ *
+ * The compile-time defaults below are safety nets used only when
+ * detection fails (or before init has run).
+ * --------------------------------------------------------------------- */
+typedef struct {
+    /* Cache sizes in bytes, per-core. */
+    size_t l1_data;
+    size_t l2;
+    size_t l3;
+    /* Physical core count (best-effort; may equal logical count). */
+    int    cores;
+    /* L1 thread-fork threshold in *elements*. Computed so the work
+     * exceeds the measured fork/join overhead. */
+    size_t l1_thread_threshold;
+    /* GEMV thread-fork threshold in m*n elements. */
+    size_t gemv_thread_threshold;
+    /* Goto blocking parameters for GEMM, in *elements*. */
+    size_t gemm_mc;
+    size_t gemm_kc;
+    size_t gemm_nc;
+    /* Measured OpenMP fork/join overhead in CPU cycles. */
+    size_t omp_overhead_cycles;
+} qblas_tune_t;
+
+QBLAS_API const qblas_tune_t *qblas_tune(void);
+
+/* Safe defaults used before init runs and as fallbacks. */
+#define QBLAS_PARALLEL_THRESHOLD_L1_DEFAULT   16384
+#define QBLAS_PARALLEL_THRESHOLD_GEMV_DEFAULT 16384
+#define QBLAS_PARALLEL_THRESHOLD_GEMM         64
 
 /* -----------------------------------------------------------------------
  * Branch hints.

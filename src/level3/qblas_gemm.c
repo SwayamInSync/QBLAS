@@ -52,12 +52,10 @@
  *      nc: chosen as a function of the number of threads — see qgemm() — so
  *          every thread gets ≥ 1 jc-block.  This constant is a *ceiling*.
  *
- *      Quad is 16 bytes per element so memory pressure is 2× double.  For
- *      a typical 32KB L1, kc * (MR + NR) * 16 ≤ L1/2 → kc ≲ 128 for MR=NR=4.
- *      For a 512KB L2, mc * kc * 16 ≤ L2/2 → mc ≲ 128 at kc=128. */
-#define QBLAS_KC_DEFAULT  128
-#define QBLAS_MC_DEFAULT  128
-#define QBLAS_NC_DEFAULT  512
+ *      Quad is 16 bytes per element so memory pressure is 2× double.
+ *
+ *      Concrete kc/mc/nc come from `qblas_tune()`, which derives them at
+ *      library init from CPUID cache descriptors. */
 
 /* ---------------- Row-major view helpers ----------------------------
  * We model A and B as virtual row-major matrices once transposes are
@@ -267,9 +265,10 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
     const size_t MR = qblas_dispatch_qgemm_MR;
     const size_t NR = qblas_dispatch_qgemm_NR;
 
-    size_t kc = QBLAS_KC_DEFAULT;
-    size_t mc = QBLAS_MC_DEFAULT;
-    size_t nc = QBLAS_NC_DEFAULT;
+    const qblas_tune_t *tune = qblas_tune();
+    size_t kc = tune->gemm_kc;
+    size_t mc = tune->gemm_mc;
+    size_t nc = tune->gemm_nc;
     if (kc > kk) kc = kk;
     if (mc > mm) mc = mm;
 

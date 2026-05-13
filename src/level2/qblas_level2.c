@@ -71,7 +71,7 @@ void cblas_qgemv(QBLAS_LAYOUT layout, QBLAS_TRANSPOSE trans,
 
     if (do_kernel_T) {
         int nthreads = qblas_resolve_threads(rm_rows * rm_cols, 1);
-        if (nthreads > 1 && rm_rows * rm_cols >= QBLAS_PARALLEL_THRESHOLD_GEMV) {
+        if (nthreads > 1 && rm_rows * rm_cols >= qblas_tune()->gemv_thread_threshold) {
 #ifdef _OPENMP
             /* gemv_t output y has length rm_cols.  We can parallelise along
              * rm_cols by treating each column of A^T as an independent dot
@@ -98,7 +98,7 @@ void cblas_qgemv(QBLAS_LAYOUT layout, QBLAS_TRANSPOSE trans,
                                x + ox, incx, beta, y + oy, incy);
     } else {
         int nthreads = qblas_resolve_threads(rm_rows * rm_cols, 1);
-        if (nthreads > 1 && rm_rows * rm_cols >= QBLAS_PARALLEL_THRESHOLD_GEMV) {
+        if (nthreads > 1 && rm_rows * rm_cols >= qblas_tune()->gemv_thread_threshold) {
 #ifdef _OPENMP
             #pragma omp parallel num_threads(nthreads)
             {
