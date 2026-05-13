@@ -1,4 +1,17 @@
-add_executable(qblas_test test_qblas.c)
-target_link_libraries(qblas_test PRIVATE qblas)
-target_include_directories(qblas_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-add_test(NAME qblas_test COMMAND qblas_test)
+# Each test target is a C executable linking the qblas shared lib.
+
+set(QBLAS_TESTS
+    test_smoke
+    test_level1
+    test_level2
+    test_gemm
+    test_level3_extra)
+
+foreach(t ${QBLAS_TESTS})
+    add_executable(${t} ${t}.c)
+    target_link_libraries(${t} PRIVATE qblas)
+    target_include_directories(${t} PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME ${t} COMMAND ${t})
+endforeach()

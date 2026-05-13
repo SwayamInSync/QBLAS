@@ -215,40 +215,42 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
 
     int row_major = (layout == QblasRowMajor);
 
-    /* Strategy: always compute in *row-major-of-C* view.  If C is column
-     * major we instead compute (alpha * op(B)^T * op(A)^T + beta * C^T)
-     * which is the same buffer, just transposed.  Net effect: swap m↔n,
-     * swap A↔B, flip both transposes. */
+    /* Strategy: always compute in a row-major C view.  Column-major C is
+     * the same buffer reinterpreted: col-major C[i,j] at C + i + j*ldc is
+     * the same address as row-major C^T[j,i] at C + j*ldc + i (additions
+     * commute).  So a col-major gemm
+     *   C := alpha op(A) op(B) + beta C    (C is m x n)
+     * becomes the row-major gemm
+     *   C^T := alpha op(B)^T op(A)^T + beta C^T   (C^T is n x m)
+     * The C buffer doesn't move; we just swap M↔N, swap A↔B, and flip
+     * both transposes.  The leading dim of the (new) row-major C is the
+     * user's ldc (unchanged). */
     qmat_t Av, Bv;
-    Sleef_quad *Crm;
-    size_t mm, nn, kk;
-    size_t ldc_eff;
+    size_t mm, nn, kk = k;
+    size_t ldc_eff = (size_t)ldc;
     if (row_major) {
-        mm = m; nn = n; kk = k;
+        mm = m; nn = n;
         Av = make_view(A, lda, layout, transa);
         Bv = make_view(B, ldb, layout, transb);
-        Crm = C;
-        ldc_eff = (size_t)ldc;
     } else {
-        /* Reinterpret as row-major by flipping. */
-        mm = n; nn = m; kk = k;
-        /* In the new view: A_new = op(B)^T, B_new = op(A)^T. */
-        QBLAS_TRANSPOSE new_ta = (transb == QblasNoTrans) ? QblasTrans : QblasNoTrans;
-        QBLAS_TRANSPOSE new_tb = (transa == QblasNoTrans) ? QblasTrans : QblasNoTrans;
-        Av = make_view(B, ldb, QblasRowMajor, new_ta);
-        Bv = make_view(A, lda, QblasRowMajor, new_tb);
-        Crm = C;
-        ldc_eff = (size_t)ldc;
+        /* For column-major C we instead compute C^T = α·op(B)^T·op(A)^T + β·C^T
+         * which is the same buffer.  Derivation of strides:
+         *   col-major A, transa=N: op(A)[i,j] addr = base + i + j*lda.
+         *     op(A)^T[i,j] = op(A)[j,i] = base + j + i*lda → (rs=lda, cs=1).
+         *     That matches make_view(RowMajor, NoTrans).
+         *   col-major A, transa=T: op(A)[i,j] = A[j,i] = base + j + i*lda.
+         *     op(A)^T[i,j] = base + i + j*lda → (rs=1, cs=lda).
+         *     That matches make_view(RowMajor, Trans).
+         * So for the rewrite we keep the original transpose flags; only the
+         * A↔B and M↔N swap is needed. */
+        mm = n; nn = m;
+        Av = make_view(B, ldb, QblasRowMajor, transb);
+        Bv = make_view(A, lda, QblasRowMajor, transa);
     }
 
-    /* Pre-scale C. */
-    if (row_major) {
-        scale_C(1, mm, nn, beta, Crm, ldc_eff);
-    } else {
-        /* C is column-major: we wrote everything in transposed (row-major)
-         * coords, so iterate accordingly. */
-        scale_C(0, n, m, beta, Crm, ldc_eff);
-    }
+    /* Pre-scale C (row-major view).  The same memory accesses cover the
+     * col-major buffer because we've swapped m↔n. */
+    scale_C(1, mm, nn, beta, C, ldc_eff);
 
     if (qiszero(alpha) || kk == 0) return;
 
@@ -263,16 +265,8 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
     if (kc > kk) kc = kk;
     if (mc > mm) mc = mm;
     if (nc > nn) nc = nn;
-    /* Round mc / nc up to MR / NR multiples so the inner loops are clean. */
     size_t mc_pad = ((mc + MR - 1) / MR) * MR;
     size_t nc_pad = ((nc + NR - 1) / NR) * NR;
-
-    /* For row-major Crm we walk Crm[i, j] = Crm + i*ldc_eff + j; for the
-     * column-major rewrite, Crm[i_new, j_new] (in our virtual view) lives
-     * at Crm + i_new + j_new * ldc_eff — i.e. row stride 1, col stride
-     * ldc_eff.  We pass either form into the kernels by adjusting the
-     * effective ldc and pointer per tile. */
-    int col_view_for_C = !row_major;  /* if true, virtual rows of C have stride 1 */
 
     size_t Bp_size = kc * nc_pad;
     size_t Ap_size = mc_pad * kc;
@@ -320,59 +314,14 @@ void cblas_qgemm(QBLAS_LAYOUT layout,
                             size_t m_real = (ic + ir + MR <= ic + mc_use) ? MR : (mc_use - ir);
                             const Sleef_quad *Ap_panel = Ap + (ir / MR) * (kc_use * MR);
 
-                            /* Position in C for this tile. */
-                            Sleef_quad *C_tile;
-                            size_t C_row_stride; /* stride between micro-kernel "rows" */
-                            if (!col_view_for_C) {
-                                /* row-major C: C[i*ldc + j], rows stride ldc */
-                                C_tile = Crm + (ic + ir) * ldc_eff + (jc + jr);
-                                C_row_stride = ldc_eff;
-                            } else {
-                                /* col-major C: virtual row i_new, col j_new
-                                 * lives at C + i_new + j_new * ldc.  But we
-                                 * computed the gemm in the transposed view
-                                 * where i_new=jc+jr direction, j_new=ic+ir
-                                 * direction — wait, no. We swapped m↔n.
-                                 *
-                                 * Actually the col-major rewrite means the
-                                 * kernel's (i, j) corresponds to original
-                                 * (j, i) in user space.  Original C[j, i] in
-                                 * column-major = C + i*ldc + j.  So in the
-                                 * virtual view, "row i" of kernel = original
-                                 * column i; stride between virtual rows of C
-                                 * equals stride between original cols = ldc.
-                                 *
-                                 * Hmm — that's actually the same memory
-                                 * stride as the row-major case.  The only
-                                 * difference is what we pass for the tile
-                                 * base. */
-                                C_tile = Crm + (jc + jr) + (ic + ir) * ldc_eff;
-                                /* Now the micro-kernel "moves down one row"
-                                 * by +1 in memory; "moves right one column"
-                                 * by +ldc_eff.  But it expects rows of stride
-                                 * ldc and cols of stride 1.  So this is
-                                 * effectively the *transpose* of what we
-                                 * want — the kernel can't handle that.
-                                 *
-                                 * Easiest correct fix: write into a scratch
-                                 * MR x NR (row stride NR) and transpose-copy
-                                 * back. */
-                                Sleef_quad scratch[16 * 16];
-                                size_t i, j;
-                                for (i = 0; i < MR * NR; ++i) scratch[i] = QBLAS_ZERO;
-                                qblas_dispatch_qgemm_kernel(kc_use, alpha,
-                                                            Ap_panel, Bp_panel,
-                                                            scratch, NR);
-                                for (i = 0; i < m_real; ++i)
-                                    for (j = 0; j < n_real; ++j)
-                                        C_tile[j + i * ldc_eff] =
-                                            qadd(C_tile[j + i * ldc_eff],
-                                                 scratch[i * NR + j]);
-                                continue; /* skip the normal kernel path */
-                            }
+                            /* Same address formula in either layout: a
+                             * col-major buffer with leading dim ldc, when
+                             * viewed as row-major (n x m) with leading dim
+                             * ldc, has identical element addresses. */
+                            Sleef_quad *C_tile = C + (ic + ir) * ldc_eff + (jc + jr);
                             apply_tile(m_real, n_real, MR, NR, kc_use,
                                        alpha, Ap_panel, Bp_panel,
-                                       C_tile, C_row_stride);
+                                       C_tile, ldc_eff);
                         }
                     }
                 }

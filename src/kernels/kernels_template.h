@@ -141,8 +141,9 @@ static Sleef_quad QV_FN(qdot)(size_t n,
             acc = qfma(x[i], y[i], acc);
 #endif
     } else {
-        ptrdiff_t ix = (incx < 0) ? (ptrdiff_t)(n - 1) * (-incx) : 0;
-        ptrdiff_t iy = (incy < 0) ? (ptrdiff_t)(n - 1) * (-incy) : 0;
+        /* Caller already shifted x/y to the logical first element.  Walk
+         * with signed strides starting at zero. */
+        ptrdiff_t ix = 0, iy = 0;
         for (size_t i = 0; i < n; ++i) {
             acc = qfma(x[ix], y[iy], acc);
             ix += incx;
@@ -196,8 +197,7 @@ static void QV_FN(qaxpy)(size_t n, Sleef_quad alpha,
             y[i] = qfma(alpha, x[i], y[i]);
 #endif
     } else {
-        ptrdiff_t ix = (incx < 0) ? (ptrdiff_t)(n - 1) * (-incx) : 0;
-        ptrdiff_t iy = (incy < 0) ? (ptrdiff_t)(n - 1) * (-incy) : 0;
+        ptrdiff_t ix = 0, iy = 0;
         for (size_t i = 0; i < n; ++i) {
             y[iy] = qfma(alpha, x[ix], y[iy]);
             ix += incx;
@@ -213,7 +213,7 @@ static void QV_FN(qscal)(size_t n, Sleef_quad alpha, Sleef_quad *x, ptrdiff_t in
         if (incx == 1) {
             for (size_t i = 0; i < n; ++i) x[i] = QBLAS_ZERO;
         } else {
-            ptrdiff_t ix = (incx < 0) ? (ptrdiff_t)(n - 1) * (-incx) : 0;
+            ptrdiff_t ix = 0;
             for (size_t i = 0; i < n; ++i) { x[ix] = QBLAS_ZERO; ix += incx; }
         }
         return;
@@ -245,7 +245,7 @@ static void QV_FN(qscal)(size_t n, Sleef_quad alpha, Sleef_quad *x, ptrdiff_t in
         for (size_t i = 0; i < n; ++i) x[i] = qmul(alpha, x[i]);
 #endif
     } else {
-        ptrdiff_t ix = (incx < 0) ? (ptrdiff_t)(n - 1) * (-incx) : 0;
+        ptrdiff_t ix = 0;
         for (size_t i = 0; i < n; ++i) {
             x[ix] = qmul(alpha, x[ix]);
             ix += incx;
@@ -280,7 +280,7 @@ static Sleef_quad QV_FN(qasum)(size_t n, const Sleef_quad *x, ptrdiff_t incx) {
         for (size_t i = 0; i < n; ++i) acc = qadd(acc, qfabs(x[i]));
 #endif
     } else {
-        ptrdiff_t ix = (incx < 0) ? (ptrdiff_t)(n - 1) * (-incx) : 0;
+        ptrdiff_t ix = 0;
         for (size_t i = 0; i < n; ++i) {
             acc = qadd(acc, qfabs(x[ix]));
             ix += incx;
@@ -304,9 +304,8 @@ static size_t QV_FN(qiamax)(size_t n, const Sleef_quad *x, ptrdiff_t incx) {
             if (Sleef_icmpgtq1(v, best)) { best = v; arg = i; }
         }
     } else {
-        ptrdiff_t ix = (incx < 0) ? (ptrdiff_t)(n - 1) * (-incx) : 0;
-        Sleef_quad v0 = qfabs(x[ix]);
-        best = v0; arg = 0;
+        ptrdiff_t ix = 0;
+        best = qfabs(x[ix]); arg = 0;
         ix += incx;
         for (size_t i = 1; i < n; ++i) {
             Sleef_quad v = qfabs(x[ix]);
