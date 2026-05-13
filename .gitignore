@@ -1,1 +1,11 @@
 build/
+build-*/
+.sleef-prefix/
+.cache/
+compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+.DS_Store
