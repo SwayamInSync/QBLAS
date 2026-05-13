@@ -133,9 +133,29 @@ static void test_trsm_left(int m, int n, QBLAS_LAYOUT layout,
     else for (int i = 0; i < m; ++i) for (int j = 0; j < n; ++j)
         X_row[(size_t)i * n + j] = B_use[(size_t)j * m + i];
 
-    /* Verify: op(A) * X ≈ alpha * B0  (row-major from now on). */
+    /* Verify with the *backward error* of the solve:
+     *   ‖op(A)·X − alpha·B0‖_F / (‖A‖_F · ‖X‖_F + ‖alpha·B0‖_F)
+     * which is the right stability check for triangular solves and
+     * doesn't blow up element-wise even when the condition number is high
+     * (random unit triangular has κ that grows fast with m). */
     int doT = (transa == QblasTrans);
     int upper = (uplo == QblasUpper);
+    double res_sq = 0.0, denom_sq = 0.0, A_fro = 0.0, X_fro = 0.0, B_fro = 0.0;
+    for (int i = 0; i < m; ++i) {
+        for (int p = 0; p < m; ++p) {
+            int in_tri_orig = upper ? (p >= i) : (p <= i);
+            if (!in_tri_orig) continue;
+            double a = (diag == QblasUnit && p == i) ? 1.0
+                                                     : dq(rowmaj_A(A_row, m, i, p));
+            A_fro += a * a;
+        }
+    }
+    for (int i = 0; i < m; ++i) {
+        for (int j = 0; j < n; ++j) {
+            X_fro += dq(rowmaj_B(X_row, n, i, j)) * dq(rowmaj_B(X_row, n, i, j));
+            B_fro += dq(q_mul(alpha, rowmaj_B(B0_row, n, i, j))) * dq(q_mul(alpha, rowmaj_B(B0_row, n, i, j)));
+        }
+    }
     for (int i = 0; i < m; ++i) {
         for (int j = 0; j < n; ++j) {
             Sleef_quad s = qd(0.0);
@@ -150,16 +170,22 @@ static void test_trsm_left(int m, int n, QBLAS_LAYOUT layout,
                 s = q_fma(aip, rowmaj_B(X_row, n, p, j), s);
             }
             Sleef_quad rhs = q_mul(alpha, rowmaj_B(B0_row, n, i, j));
-            Sleef_quad d = q_abs(q_sub(s, rhs));
-            Sleef_quad ss = q_add(q_abs(s), q_abs(rhs));
-            double dd = dq(d), sss = dq(ss);
-            double r = (sss > 1e-20) ? dd/sss : dd;
-            char tag[128];
-            snprintf(tag, sizeof tag, "trsm m=%d n=%d layout=%d uplo=%d ta=%d diag=%d i=%d j=%d",
-                     m, n, layout, uplo, transa, diag, i, j);
-            CHECK(r < 1e-25, "%s rel=%.3e", tag, r);
+            double r = dq(q_sub(s, rhs));
+            res_sq += r * r;
         }
     }
+    A_fro = sqrt(A_fro);
+    X_fro = sqrt(X_fro);
+    B_fro = sqrt(B_fro);
+    denom_sq = A_fro * X_fro + B_fro + 1e-300;
+    double backward_err = sqrt(res_sq) / denom_sq;
+    char tag[128];
+    snprintf(tag, sizeof tag, "trsm m=%d n=%d layout=%d uplo=%d ta=%d diag=%d",
+             m, n, layout, uplo, transa, diag);
+    /* Quad u05 FMA gives ~1e-34 per op; m*n ops total → ~m*n*1e-34 worst
+     * case.  We allow a generous 1e-25 ceiling which is still ~1e10 tighter
+     * than double precision. */
+    CHECK(backward_err < 1e-25, "%s backward_err=%.3e", tag, backward_err);
     free(X_row);
     if (A_col) free(A_col);
     if (B_col) free(B_col);
@@ -176,8 +202,9 @@ int main(void) {
                               (QBLAS_UPLO)uplo, (QBLAS_TRANSPOSE)trans);
                 }
     }
-    /* trsm tests only on a few sizes to keep wallclock reasonable. */
-    int td[][2] = { {3,3}, {8,5}, {17,11} };
+    /* trsm tests — include sizes both above and below the NB=64 block size
+     * so the blocked path and the small-problem fallback are both exercised. */
+    int td[][2] = { {3,3}, {8,5}, {17,11}, {63,17}, {64,33}, {129,11}, {200,40} };
     for (size_t d = 0; d < sizeof td / sizeof td[0]; ++d) {
         for (int layout = QblasRowMajor; layout <= QblasColMajor; ++layout)
             for (int uplo = QblasUpper; uplo <= QblasLower; ++uplo)

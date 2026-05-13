@@ -9,7 +9,7 @@ set(QBLAS_TESTS
 
 foreach(t ${QBLAS_TESTS})
     add_executable(${t} ${t}.c)
-    target_link_libraries(${t} PRIVATE qblas)
+    target_link_libraries(${t} PRIVATE qblas m)
     target_include_directories(${t} PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR})
