@@ -59,6 +59,33 @@ static void BM_VectorNorm(benchmark::State &state) {
 }
 BENCHMARK(BM_VectorNorm)->Arg(1000)->Arg(4000)->Arg(16000)->Arg(64000);
 
+/* New-only L1: asum, scal */
+static void BM_ASUM(benchmark::State &state) {
+    size_t n = static_cast<size_t>(state.range(0));
+    std::vector<Sleef_quad> x(n);
+    fill_random(x, 1);
+    Sleef_quad s = qd(0.0);
+    for (auto _ : state) {
+        s = cblas_qasum(static_cast<int>(n), x.data(), 1);
+        benchmark::DoNotOptimize(s);
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(n));
+}
+BENCHMARK(BM_ASUM)->Arg(1000)->Arg(4000)->Arg(16000)->Arg(64000);
+
+static void BM_SCAL(benchmark::State &state) {
+    size_t n = static_cast<size_t>(state.range(0));
+    std::vector<Sleef_quad> x(n);
+    fill_random(x, 1);
+    Sleef_quad a = qd(0.9999);
+    for (auto _ : state) {
+        cblas_qscal(static_cast<int>(n), a, x.data(), 1);
+        benchmark::DoNotOptimize(x.data());
+    }
+    state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(n));
+}
+BENCHMARK(BM_SCAL)->Arg(1000)->Arg(4000)->Arg(16000)->Arg(64000);
+
 /* ---- GEMV sizes: 100, 200, 400, 800, 1600 (square) ---- */
 static void BM_GEMV(benchmark::State &state) {
     size_t m = static_cast<size_t>(state.range(0)), n = m;
