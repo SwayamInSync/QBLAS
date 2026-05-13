@@ -54,19 +54,36 @@ Sleef_quad cblas_qnrm2(int n, const Sleef_quad *x, int incx) {
     if (n <= 0) return QBLAS_ZERO;
     /* dot(x,x) is sufficient — no overflow guard for now; quad range
      * covers ~10^4932 so true overflow is extremely rare in practice. */
-    Sleef_quad s;
-    if (incx == 1) {
-        s = qblas_dispatch_qdot((size_t)n, x, 1, x, 1);
-    } else {
-        ptrdiff_t ox = neg_offset(incx, n);
-        s = qblas_dispatch_qdot((size_t)n, x + ox, incx, x + ox, incx);
-    }
+    Sleef_quad s = cblas_qdot(n, x, incx, x, incx);
     return qsqrt(s);
 }
 
 /* ------------------------------------------------------------------ */
 Sleef_quad cblas_qasum(int n, const Sleef_quad *x, int incx) {
     if (n <= 0) return QBLAS_ZERO;
+    if (incx == 1) {
+        int nthreads = qblas_resolve_threads((size_t)n, 1);
+        if (nthreads > 1 && n >= QBLAS_PARALLEL_THRESHOLD_L1) {
+#ifdef _OPENMP
+            Sleef_quad totals[256] = {0};
+            if (nthreads > 256) nthreads = 256;
+            #pragma omp parallel num_threads(nthreads)
+            {
+                int tid = omp_get_thread_num();
+                int nt  = omp_get_num_threads();
+                size_t chunk = (size_t)n / nt;
+                size_t rem   = (size_t)n % nt;
+                size_t start = (size_t)tid * chunk + (tid < (int)rem ? (size_t)tid : rem);
+                size_t cnt   = chunk + (tid < (int)rem ? 1u : 0u);
+                totals[tid] = qblas_dispatch_qasum(cnt, x + start, 1);
+            }
+            Sleef_quad acc = QBLAS_ZERO;
+            for (int t = 0; t < nthreads; ++t) acc = qadd(acc, totals[t]);
+            return acc;
+#endif
+        }
+        return qblas_dispatch_qasum((size_t)n, x, 1);
+    }
     ptrdiff_t ox = neg_offset(incx, n);
     return qblas_dispatch_qasum((size_t)n, x + ox, (ptrdiff_t)incx);
 }
