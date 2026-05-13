@@ -16,3 +16,7 @@ endif()
 add_executable(qblas_bench bench_qblas.cc)
 target_link_libraries(qblas_bench PRIVATE qblas benchmark::benchmark)
 target_include_directories(qblas_bench PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+add_executable(qblas_bench_compare bench_compare.cc)
+target_link_libraries(qblas_bench_compare PRIVATE qblas benchmark::benchmark)
+target_include_directories(qblas_bench_compare PRIVATE ${CMAKE_SOURCE_DIR}/include)
