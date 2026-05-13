@@ -408,9 +408,12 @@ int qblas_resolve_threads(size_t work_units, size_t per_unit_cost) {
     if (overhead < 1024) overhead = 1024;
     size_t total_cycles = work_units * per_unit_cost * quad_cycles_per_op;
     if (total_cycles < overhead * 2) return 1;
-    /* Pick the number of threads where each one gets ≥ overhead worth of
-     * work.  This caps `t` automatically on big machines for small jobs. */
+    /* Pick the largest thread count that still gives each thread at least
+     * `overhead` cycles of work.  Capping more aggressively (factor > 1)
+     * hurt small-GEMM perf in practice because it cut the nc-block count
+     * below what the kernel needs to keep all hardware fetchers busy. */
     size_t t = total_cycles / overhead;
+    if (t < 2) t = 2;
     if ((int)t > max) t = (size_t)max;
     if (g_user_thread_cap && (int)t > g_user_thread_cap) t = (size_t)g_user_thread_cap;
     if (t < 1) t = 1;
