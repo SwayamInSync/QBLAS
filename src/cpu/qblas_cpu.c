@@ -196,9 +196,12 @@ static size_t measure_omp_overhead_cycles(int max_threads) {
 static void derive_tunables(qblas_tune_t *t) {
     /* L1 threshold: switch to threaded when total quad-op cycles exceed
      * fork-cost.  Each quad op is ~32 cycles, so threshold in elements is
-     * ~ omp_overhead / 32, with a floor that keeps very tiny vectors serial. */
-    size_t l1_thr = t->omp_overhead_cycles / 16; /* 16 = half of quad-op cost as headroom */
-    if (l1_thr < 4096) l1_thr = 4096;
+     * ~ omp_overhead / 32.  Floor 1024 — below that even threading overhead
+     * dominates regardless of CPU.  The ratio /16 instead of /32 gives ~2×
+     * headroom on the break-even point, matching empirical observations. */
+    size_t l1_thr = t->omp_overhead_cycles / 16;
+    if (l1_thr < 1024) l1_thr = 1024;
+    if (l1_thr > 16384) l1_thr = 16384;
     t->l1_thread_threshold = l1_thr;
     t->gemv_thread_threshold = l1_thr * 2;
 

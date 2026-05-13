@@ -395,13 +395,13 @@ static void QV_FN(qgemv_t)(size_t m, size_t k,
 /* Register-tile shape per width.
  *
  * For ILP we want enough independent accumulators to hide the FMA latency
- * (each quad FMA is ~30 cycles of internal DD math).  More accumulators
- * also mean more state but better instruction-level overlap.  Empirically:
+ * (each quad FMA is ~95 cycles of internal DD math).  More accumulators
+ * also mean better instruction-level overlap.  Tile shapes by width:
  *
  *   width 1: MR×NR = 4×4 = 16 scalar acc
- *   width 2: MR×NR = 4×4 = 8 vector acc (2 vec per row)
- *   width 4: MR×NR = 4×8 = 8 vector acc (2 vec per row, NR_VEC=2)
- *   width 8: MR×NR = 4×8 = 4 vector acc (1 vec per row, NR_VEC=1)
+ *   width 2: MR×NR = 8×2 = 8 vector acc (1 vec per row, MR=8 for ILP)
+ *   width 4: MR×NR = 8×4 = 8 vector acc (1 vec per row, MR=8 for ILP)
+ *   width 8: MR×NR = 4×8 = 4 vector acc (1 vec per row)
  */
 #if QV_WIDTH == 1
 #  define QV_MR 4
@@ -411,7 +411,7 @@ static void QV_FN(qgemv_t)(size_t m, size_t k,
 #  define QV_NR 4   /* NR_VEC=2 → 8 acc */
 #elif QV_WIDTH == 4
 #  define QV_MR 4
-#  define QV_NR 4   /* NR_VEC=1 → 4 acc; bigger tile (NR=8) is L1-pressure bound */
+#  define QV_NR 4   /* NR_VEC=1 → 4 acc; we're at SLEEF FMA throughput ceiling */
 #elif QV_WIDTH == 8
 #  define QV_MR 4
 #  define QV_NR 8   /* NR_VEC=1 → 4 acc */
@@ -424,10 +424,19 @@ static void QV_FN(qgemm_kernel)(size_t kc,
                                 Sleef_quad *C, size_t ldc) {
 #if QV_WIDTH > 1
     enum { W = QV_WIDTH, NR_VEC = QV_NR / QV_WIDTH };
+    /* Up to 8 accumulators × NR_VEC columns.  When NR_VEC == 1 only the c_0
+     * variables are used; the compiler eliminates the unused c_1 set. */
     qv_t c00 = QV_SPLAT(QBLAS_ZERO), c01 = QV_SPLAT(QBLAS_ZERO);
     qv_t c10 = QV_SPLAT(QBLAS_ZERO), c11 = QV_SPLAT(QBLAS_ZERO);
     qv_t c20 = QV_SPLAT(QBLAS_ZERO), c21 = QV_SPLAT(QBLAS_ZERO);
     qv_t c30 = QV_SPLAT(QBLAS_ZERO), c31 = QV_SPLAT(QBLAS_ZERO);
+#if QV_MR >= 8
+    qv_t c40 = QV_SPLAT(QBLAS_ZERO), c41 = QV_SPLAT(QBLAS_ZERO);
+    qv_t c50 = QV_SPLAT(QBLAS_ZERO), c51 = QV_SPLAT(QBLAS_ZERO);
+    qv_t c60 = QV_SPLAT(QBLAS_ZERO), c61 = QV_SPLAT(QBLAS_ZERO);
+    qv_t c70 = QV_SPLAT(QBLAS_ZERO), c71 = QV_SPLAT(QBLAS_ZERO);
+    (void)c41; (void)c51; (void)c61; (void)c71;
+#endif
     (void)c01; (void)c11; (void)c21; (void)c31;
 
     for (size_t p = 0; p < kc; ++p) {
@@ -440,6 +449,16 @@ static void QV_FN(qgemm_kernel)(size_t kc,
         c10 = QV_FMA(va1, b0, c10);
         c20 = QV_FMA(va2, b0, c20);
         c30 = QV_FMA(va3, b0, c30);
+#if QV_MR >= 8
+        qv_t va4 = QV_SPLAT(A_packed[p * QV_MR + 4]);
+        qv_t va5 = QV_SPLAT(A_packed[p * QV_MR + 5]);
+        qv_t va6 = QV_SPLAT(A_packed[p * QV_MR + 6]);
+        qv_t va7 = QV_SPLAT(A_packed[p * QV_MR + 7]);
+        c40 = QV_FMA(va4, b0, c40);
+        c50 = QV_FMA(va5, b0, c50);
+        c60 = QV_FMA(va6, b0, c60);
+        c70 = QV_FMA(va7, b0, c70);
+#endif
         if (NR_VEC > 1) {
             qv_t b1 = QV_LOADU(B_packed + p * QV_NR + 1 * W);
             c01 = QV_FMA(va0, b1, c01);
@@ -454,6 +473,12 @@ static void QV_FN(qgemm_kernel)(size_t kc,
     QV_STOREU(C + 1 * ldc + 0 * W, QV_FMA(va, c10, QV_LOADU(C + 1 * ldc + 0 * W)));
     QV_STOREU(C + 2 * ldc + 0 * W, QV_FMA(va, c20, QV_LOADU(C + 2 * ldc + 0 * W)));
     QV_STOREU(C + 3 * ldc + 0 * W, QV_FMA(va, c30, QV_LOADU(C + 3 * ldc + 0 * W)));
+#if QV_MR >= 8
+    QV_STOREU(C + 4 * ldc + 0 * W, QV_FMA(va, c40, QV_LOADU(C + 4 * ldc + 0 * W)));
+    QV_STOREU(C + 5 * ldc + 0 * W, QV_FMA(va, c50, QV_LOADU(C + 5 * ldc + 0 * W)));
+    QV_STOREU(C + 6 * ldc + 0 * W, QV_FMA(va, c60, QV_LOADU(C + 6 * ldc + 0 * W)));
+    QV_STOREU(C + 7 * ldc + 0 * W, QV_FMA(va, c70, QV_LOADU(C + 7 * ldc + 0 * W)));
+#endif
     if (NR_VEC > 1) {
         QV_STOREU(C + 0 * ldc + 1 * W, QV_FMA(va, c01, QV_LOADU(C + 0 * ldc + 1 * W)));
         QV_STOREU(C + 1 * ldc + 1 * W, QV_FMA(va, c11, QV_LOADU(C + 1 * ldc + 1 * W)));
