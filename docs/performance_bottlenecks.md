@@ -15,9 +15,6 @@ on AVX2.  A tight microbench with 8 independent FMAs in flight tops out at
 the same 30.8 M/core, which is exactly the throughput of
 `Sleef_fmaq4_u05avx2`.  We're at the SLEEF symbol's ceiling.
 
-Measured: see `/tmp/sleef_peak.c` style microbench (Zen 3 @ ~3 GHz):
-~97 cycles per quad-FMA call.
-
 **What it would unlock.**  ~2–3× single-thread, multiplied across all
 cores.  Concretely, expectation:
 - Single-thread: 30 M → ~80–100 M quad-FMAs/sec/core
