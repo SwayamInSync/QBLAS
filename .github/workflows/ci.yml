@@ -6,12 +6,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-# We test on Ubuntu (gcc + clang) and macOS (clang), all matrix entries
-# run the same: build SLEEF via scripts/bootstrap_sleef.sh, build qblas,
-# run ctest.  No platform-specific behaviour is needed because both the
-# bootstrap and the qblas CMake auto-detect cache sizes, ISA flags, and
-# OpenMP at configure time.
-
 jobs:
   test:
     name: ${{ matrix.os }} / ${{ matrix.compiler }}
@@ -100,8 +94,6 @@ jobs:
           done
 
   bench-baseline:
-    # Run benchmarks on Linux gcc only and post results as an artifact for
-    # tracking perf-regression over time.  Doesn't gate on pass/fail.
     name: benchmark / ubuntu-gcc
     runs-on: ubuntu-latest
     needs: test
