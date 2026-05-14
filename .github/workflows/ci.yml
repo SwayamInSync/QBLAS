@@ -42,7 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential libomp-dev
+          sudo apt-get install -y cmake ninja-build build-essential libomp-dev python3 python3-pip python3-venv
           if [ "${{ matrix.compiler }}" = "clang" ]; then
             sudo apt-get install -y clang libomp-dev
           fi
@@ -50,7 +50,14 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja libomp
+          brew install cmake ninja libomp python@3.12
+
+      - name: Install numpy >= 2.0
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install 'numpy>=2.0'
+          echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
 
       - name: Build SLEEF with full SIMD coverage
         env:
@@ -69,7 +76,7 @@ jobs:
       - name: Build qblas + tests + bench
         run: cmake --build build --parallel
 
-      - name: Run correctness tests
+      - name: Run correctness tests (C + Python-vs-numpy)
         run: ctest --test-dir build --output-on-failure
 
       - name: Smoke-run the benchmark (small problem sizes)
