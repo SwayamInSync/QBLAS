@@ -1,4 +1,3 @@
-/* AVX2 kernel tier — width-4 SLEEF quad vectors (Sleef_quadx4). */
 #define QBLAS_HAS_AVX2 1
 #define QV_WIDTH 4
 #define QV_SUFFIX avx2

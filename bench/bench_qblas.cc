@@ -1,15 +1,5 @@
-/* QBLAS Google Benchmark suite — Level 1, 2, 3 routines + scaling sweeps.
- *
- * Conventions
- *   * Each benchmark reports `items_per_second` so cross-size comparison is
- *     direct.  For BLAS ops the "item" is naturally an op (FMA), so we set
- *     items = the FMA count of the operation (n for dot/axpy, m*n for gemv,
- *     2*m*n*k for gemm).
- *   * Sizes sweep in powers of 2 plus a few prime sizes to exercise edge
- *     tiles.  Capped to fit in a few seconds at peak quad throughput.
- *   * For threaded routines we sweep the thread count via UseRealTime so
- *     wall-clock dominates.
- */
+/* Google Benchmark suite.  `items_per_second` = quad-FMA throughput
+ * (items = n for dot/axpy, m*n for gemv, m*n*k for gemm/syrk). */
 
 #include <benchmark/benchmark.h>
 #include <qblas/qblas.h>
@@ -26,8 +16,6 @@ void fill_random(std::vector<T> &v, unsigned seed) {
     std::uniform_real_distribution<double> d(-1.0, 1.0);
     for (auto &q : v) q = qd(d(g));
 }
-
-/* --------------------- Level 1 ---------------------------------- */
 
 void BM_qdot(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
@@ -95,11 +83,9 @@ void BM_qasum(benchmark::State &state) {
 }
 BENCHMARK(BM_qasum)->RangeMultiplier(4)->Range(1<<10, 1<<22)->UseRealTime();
 
-/* --------------------- Level 2 ---------------------------------- */
-
 void BM_qgemv(benchmark::State &state) {
     size_t m = static_cast<size_t>(state.range(0));
-    size_t n = m; /* square */
+    size_t n = m;
     std::vector<Sleef_quad> A(m * n), x(n), y(m);
     fill_random(A, 1); fill_random(x, 2); fill_random(y, 3);
     Sleef_quad alpha = qd(1.0), beta = qd(0.5);
@@ -126,8 +112,6 @@ void BM_qgemv_t(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(m * n));
 }
 BENCHMARK(BM_qgemv_t)->RangeMultiplier(2)->Range(128, 4096)->UseRealTime();
-
-/* --------------------- Level 3 ---------------------------------- */
 
 void BM_qgemm(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
@@ -173,11 +157,6 @@ void BM_qsyrk(benchmark::State &state) {
     state.SetItemsProcessed(state.iterations() * static_cast<int64_t>(n * n * k));
 }
 BENCHMARK(BM_qsyrk)->RangeMultiplier(2)->Range(64, 1024)->UseRealTime();
-
-/* --------------------- Tier comparison ---------------------------
- * Set QBLAS_DISPATCH=avx2|sse2|generic and rerun for direct comparison.
- * We don't toggle the dispatch from within the bench (the init only
- * runs once); use multiple bench runs from the command line. */
 
 } /* namespace */
 

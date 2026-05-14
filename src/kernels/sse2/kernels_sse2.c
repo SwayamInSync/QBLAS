@@ -1,4 +1,3 @@
-/* SSE2 kernel tier — width-2 SLEEF quad vectors. */
 #define QBLAS_HAS_SSE2 1
 #define QV_WIDTH 2
 #define QV_SUFFIX sse2

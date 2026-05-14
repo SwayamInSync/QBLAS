@@ -1,23 +1,13 @@
-/* Generic kernel template parameterised over SLEEF quad vector width.
- *
- * Each kernels/<isa>/kernels_<isa>.c sets `QV_WIDTH` (1, 2, 4, or 8) before
- * including this header, plus an ISA suffix (e.g. `avx2`) so the generated
- * symbols can be registered without collision.  Width = 1 means scalar.
- *
- * Why a template instead of writing each kernel four times?  SLEEF already
- * exposes the same arithmetic across width family — `Sleef_addqN_u05*`,
- * `Sleef_fmaqN_u05*` — so writing the loop once parameterised over N gives
- * exact ISA dispatch with zero duplication.
- *
- * The file is `#include`d, never compiled standalone.  Names are stitched
- * together with `QV_PASTE`.
- */
+/* Kernel template instantiated once per ISA tier.  The including TU sets:
+ *   QV_WIDTH         1, 2, 4, or 8         vector width in quads
+ *   QV_SUFFIX        suffix for symbol names (generic, sse2, avx2, ...)
+ *   QV_ISA_SUFFIX    SLEEF ISA suffix for width-2 (sse2 or advsimd) */
 
 #ifndef QV_WIDTH
 #  error "kernels_template.h: define QV_WIDTH (1|2|4|8) and QV_SUFFIX first"
 #endif
 #ifndef QV_SUFFIX
-#  error "kernels_template.h: define QV_SUFFIX (a token like generic, sse2, avx2, avx512, neon)"
+#  error "kernels_template.h: define QV_SUFFIX before include"
 #endif
 
 #include "common/qblas_internal.h"
@@ -30,11 +20,6 @@
 #define QV_PASTE(a, b)  QV_PASTE_(a, b)
 #define QV_FN(name)     QV_PASTE(QV_PASTE(qblas, name), QV_SUFFIX)
 
-/* ---- Width-specific SLEEF aliases ----------------------------------
- * For widths 2/4/8 we use the explicit-ISA forms.  Width 2 has two flavours:
- * sse2 (real SSE2 hardware) and advsimd (ARM NEON).  Each tier file sets
- * QV_ISA_SUFFIX before including this header so the right symbol is picked.
- * --------------------------------------------------------------------- */
 #if QV_WIDTH == 1
    typedef Sleef_quad qv_t;
 #  define QV_ADD(a,b)     Sleef_addq1_u05((a),(b))
@@ -47,7 +32,7 @@
 #  define QV_LANE(v, i)   (v)
 #elif QV_WIDTH == 2
 #  ifndef QV_ISA_SUFFIX
-#    error "width-2 kernels must define QV_ISA_SUFFIX (e.g. sse2 or advsimd)"
+#    error "width-2 kernels must define QV_ISA_SUFFIX (sse2 or advsimd)"
 #  endif
 #  define QV_NAME_(op,ulp,isa) Sleef_ ## op ## q2 ## ulp ## isa
 #  define QV_NAME(op,ulp,isa)  QV_NAME_(op,ulp,isa)
@@ -84,11 +69,7 @@
 #  error "QV_WIDTH must be 1, 2, 4, or 8"
 #endif
 
-/* =====================================================================
- * Level 1 kernels
- * =================================================================== */
-
-/* ---- dot ------------------------------------------------------------ */
+/* dot */
 static Sleef_quad QV_FN(qdot)(size_t n,
                               const Sleef_quad *x, ptrdiff_t incx,
                               const Sleef_quad *y, ptrdiff_t incy) {
@@ -96,9 +77,7 @@ static Sleef_quad QV_FN(qdot)(size_t n,
 
     if (incx == 1 && incy == 1) {
 #if QV_WIDTH > 1
-        /* Multiple independent accumulators reduce dep-chain latency.
-         * The number of accumulators matters more than vector width — quad
-         * FMA latency is ~30-50 cycles. We use 4 lanes of qv_t. */
+        /* Four independent accumulators to overlap quad FMA latency. */
         const size_t W = (size_t)QV_WIDTH;
         const size_t UNROLL = 4;
         const size_t step = W * UNROLL;
@@ -122,13 +101,11 @@ static Sleef_quad QV_FN(qdot)(size_t n,
             a2 = QV_FMA(xv2, yv2, a2);
             a3 = QV_FMA(xv3, yv3, a3);
         }
-        /* Tail: still vectorised but no unroll. */
         for (; i + W <= n; i += W) {
             qv_t xv = QV_LOADU(x + i);
             qv_t yv = QV_LOADU(y + i);
             a0 = QV_FMA(xv, yv, a0);
         }
-        /* Combine: a0 = a0+a2, a1 = a1+a3, a0 += a1 */
         a0 = QV_ADD(a0, a2);
         a1 = QV_ADD(a1, a3);
         a0 = QV_ADD(a0, a1);
@@ -141,8 +118,8 @@ static Sleef_quad QV_FN(qdot)(size_t n,
             acc = qfma(x[i], y[i], acc);
 #endif
     } else {
-        /* Caller already shifted x/y to the logical first element.  Walk
-         * with signed strides starting at zero. */
+        /* Caller pre-shifts x/y to the logical first element so signed
+         * strides can start at zero here. */
         ptrdiff_t ix = 0, iy = 0;
         for (size_t i = 0; i < n; ++i) {
             acc = qfma(x[ix], y[iy], acc);
@@ -153,7 +130,7 @@ static Sleef_quad QV_FN(qdot)(size_t n,
     return acc;
 }
 
-/* ---- axpy ----------------------------------------------------------- */
+/* axpy */
 static void QV_FN(qaxpy)(size_t n, Sleef_quad alpha,
                          const Sleef_quad *x, ptrdiff_t incx,
                          Sleef_quad *y,       ptrdiff_t incy) {
@@ -206,7 +183,7 @@ static void QV_FN(qaxpy)(size_t n, Sleef_quad alpha,
     }
 }
 
-/* ---- scal ----------------------------------------------------------- */
+/* scal */
 static void QV_FN(qscal)(size_t n, Sleef_quad alpha, Sleef_quad *x, ptrdiff_t incx) {
     if (qisone(alpha)) return;
     if (qiszero(alpha)) {
@@ -253,7 +230,7 @@ static void QV_FN(qscal)(size_t n, Sleef_quad alpha, Sleef_quad *x, ptrdiff_t in
     }
 }
 
-/* ---- asum: sum of |x_i| -------------------------------------------- */
+/* asum: sum of |x_i| */
 static Sleef_quad QV_FN(qasum)(size_t n, const Sleef_quad *x, ptrdiff_t incx) {
     Sleef_quad acc = QBLAS_ZERO;
     if (incx == 1) {
@@ -289,11 +266,7 @@ static Sleef_quad QV_FN(qasum)(size_t n, const Sleef_quad *x, ptrdiff_t incx) {
     return acc;
 }
 
-/* ---- iamax: argmax |x_i| ------------------------------------------- */
-/* SLEEF doesn't expose a vectorised |x| > best compare in our chosen API
- * surface, so we use scalar comparisons.  In practice this is fine: the
- * abs+cmp dependency chain is short and the loop is memory-bandwidth limited
- * on real data sizes. */
+/* iamax: scalar walk; memory-bound at the sizes we ship for. */
 static size_t QV_FN(qiamax)(size_t n, const Sleef_quad *x, ptrdiff_t incx) {
     if (n == 0) return 0;
     Sleef_quad best = qfabs(x[0]);
@@ -316,18 +289,7 @@ static size_t QV_FN(qiamax)(size_t n, const Sleef_quad *x, ptrdiff_t incx) {
     return arg;
 }
 
-/* =====================================================================
- * Level 2 kernels
- *
- * gemv_n: y := alpha * A * x + beta * y
- *   A is m x k, stored with row stride lda (row-major view).  We accumulate
- *   one row of A times x at a time → reduces to a dot product per output row.
- *
- * gemv_t: y := alpha * A^T * x + beta * y
- *   A is m x k, lda rows-stride.  Iterate over rows of A, doing an axpy
- *   into y for each.  This keeps stores sequential.
- * =================================================================== */
-
+/* gemv with no transpose: each output row is a dot of one A row with x. */
 static void QV_FN(qgemv_n)(size_t m, size_t k,
                            Sleef_quad alpha,
                            const Sleef_quad *A, size_t lda,
@@ -345,14 +307,13 @@ static void QV_FN(qgemv_n)(size_t m, size_t k,
     }
 }
 
+/* gemv with transpose: scale y by beta, then accumulate alpha*x[i]*A[i,:]. */
 static void QV_FN(qgemv_t)(size_t m, size_t k,
                            Sleef_quad alpha,
                            const Sleef_quad *A, size_t lda,
                            const Sleef_quad *x, ptrdiff_t incx,
                            Sleef_quad beta,
                            Sleef_quad *y, ptrdiff_t incy) {
-    /* First scale y by beta.  Caller could push this out but for simplicity
-     * we do it here. */
     if (qiszero(beta)) {
         for (size_t j = 0; j < k; ++j) y[(ptrdiff_t)j * incy] = QBLAS_ZERO;
     } else if (!qisone(beta)) {
@@ -360,7 +321,6 @@ static void QV_FN(qgemv_t)(size_t m, size_t k,
             y[(ptrdiff_t)j * incy] = qmul(beta, y[(ptrdiff_t)j * incy]);
     }
 
-    /* For each row i of A, add alpha*x[i] * A[i,:] to y. */
     for (size_t i = 0; i < m; ++i) {
         Sleef_quad ax = qmul(alpha, x[(ptrdiff_t)i * incx]);
         if (qiszero(ax)) continue;
@@ -374,47 +334,20 @@ static void QV_FN(qgemv_t)(size_t m, size_t k,
     }
 }
 
-/* =====================================================================
- * Level 3: packed GEMM micro-kernel.
- *
- * Accumulates C(MR x NR) += alpha * A_packed(MR x kc) * B_packed(kc x NR)
- * where A is stored as a column-major MR-wide strip and B as a row-major
- * NR-wide strip — both packed contiguously by the caller.
- *
- * Tile shape depends on the width:  MR = 4, NR = 2*W  (so NR is W or 2W or 4W).
- *
- * For now we choose:
- *   width 1 → MR=4, NR=4
- *   width 2 → MR=4, NR=4   (2 quadx2 per row of C)
- *   width 4 → MR=4, NR=4   (1 quadx4 per row of C)
- *   width 8 → MR=4, NR=8   (1 quadx8 per row of C)
- *
- * This keeps register pressure bounded and the kernel symmetric.
- * =================================================================== */
-
-/* Register-tile shape per width.
- *
- * For ILP we want enough independent accumulators to hide the FMA latency
- * (each quad FMA is ~95 cycles of internal DD math).  More accumulators
- * also mean better instruction-level overlap.  Tile shapes by width:
- *
- *   width 1: MR×NR = 4×4 = 16 scalar acc
- *   width 2: MR×NR = 8×2 = 8 vector acc (1 vec per row, MR=8 for ILP)
- *   width 4: MR×NR = 8×4 = 8 vector acc (1 vec per row, MR=8 for ILP)
- *   width 8: MR×NR = 4×8 = 4 vector acc (1 vec per row)
- */
+/* Packed GEMM micro-kernel: C(MR×NR) += alpha * A_packed(MR×kc) * B_packed(kc×NR).
+ * A_packed has MR scalars per k step; B_packed has NR scalars per k step. */
 #if QV_WIDTH == 1
 #  define QV_MR 4
 #  define QV_NR 4
 #elif QV_WIDTH == 2
 #  define QV_MR 4
-#  define QV_NR 4   /* NR_VEC=2 → 8 acc */
+#  define QV_NR 4
 #elif QV_WIDTH == 4
 #  define QV_MR 4
-#  define QV_NR 4   /* NR_VEC=1 → 4 acc; we're at SLEEF FMA throughput ceiling */
+#  define QV_NR 4
 #elif QV_WIDTH == 8
 #  define QV_MR 4
-#  define QV_NR 8   /* NR_VEC=1 → 4 acc */
+#  define QV_NR 8
 #endif
 
 static void QV_FN(qgemm_kernel)(size_t kc,
@@ -424,8 +357,6 @@ static void QV_FN(qgemm_kernel)(size_t kc,
                                 Sleef_quad *C, size_t ldc) {
 #if QV_WIDTH > 1
     enum { W = QV_WIDTH, NR_VEC = QV_NR / QV_WIDTH };
-    /* Up to 8 accumulators × NR_VEC columns.  When NR_VEC == 1 only the c_0
-     * variables are used; the compiler eliminates the unused c_1 set. */
     qv_t c00 = QV_SPLAT(QBLAS_ZERO), c01 = QV_SPLAT(QBLAS_ZERO);
     qv_t c10 = QV_SPLAT(QBLAS_ZERO), c11 = QV_SPLAT(QBLAS_ZERO);
     qv_t c20 = QV_SPLAT(QBLAS_ZERO), c21 = QV_SPLAT(QBLAS_ZERO);
@@ -486,7 +417,6 @@ static void QV_FN(qgemm_kernel)(size_t kc,
         QV_STOREU(C + 3 * ldc + 1 * W, QV_FMA(va, c31, QV_LOADU(C + 3 * ldc + 1 * W)));
     }
 #else
-    /* Scalar fallback: 4x4 tile, accumulate then alpha*acc + C. */
     Sleef_quad c[QV_MR][QV_NR];
     for (size_t i = 0; i < QV_MR; ++i)
         for (size_t j = 0; j < QV_NR; ++j)
@@ -504,12 +434,6 @@ static void QV_FN(qgemm_kernel)(size_t kc,
 #endif
 }
 
-/* =====================================================================
- * Registration entry point.
- *
- * Updates the global dispatch table with this tier's function pointers.
- * Called from src/cpu/qblas_cpu.c after determining the CPU tier.
- * =================================================================== */
 void QV_FN(register_kernels)(void);
 void QV_FN(register_kernels)(void) {
     qblas_dispatch_qdot          = QV_FN(qdot);

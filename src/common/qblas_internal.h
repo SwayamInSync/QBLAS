@@ -1,8 +1,3 @@
-/* QBLAS internal common header.
- *
- * Helpers that every translation unit in src/ may rely on.  None of this is
- * part of the public ABI.
- */
 #ifndef QBLAS_INTERNAL_H
 #define QBLAS_INTERNAL_H
 
@@ -17,11 +12,6 @@
 extern "C" {
 #endif
 
-/* -----------------------------------------------------------------------
- * Convenience scalar quad helpers (always available, library-internal).
- * They route to the SLEEF runtime-dispatch entry points so we don't care
- * about CPU features at compile time for scalar paths.
- * --------------------------------------------------------------------- */
 #define QBLAS_ZERO   Sleef_cast_from_doubleq1(0.0)
 #define QBLAS_ONE    Sleef_cast_from_doubleq1(1.0)
 #define QBLAS_NEGONE Sleef_cast_from_doubleq1(-1.0)
@@ -33,40 +23,23 @@ static inline Sleef_quad qdiv(Sleef_quad a, Sleef_quad b) { return Sleef_divq1_u
 static inline Sleef_quad qfma(Sleef_quad a, Sleef_quad b, Sleef_quad c) {
     return Sleef_fmaq1_u05(a, b, c);
 }
-static inline Sleef_quad qneg(Sleef_quad a) { return Sleef_negq1(a); }
+static inline Sleef_quad qneg(Sleef_quad a)  { return Sleef_negq1(a); }
 static inline Sleef_quad qfabs(Sleef_quad a) { return Sleef_fabsq1(a); }
 static inline Sleef_quad qsqrt(Sleef_quad a) { return Sleef_sqrtq1_u05(a); }
 
-static inline bool qiszero(Sleef_quad a) {
-    return Sleef_icmpeqq1(a, QBLAS_ZERO) != 0;
-}
-static inline bool qisone(Sleef_quad a) {
-    return Sleef_icmpeqq1(a, QBLAS_ONE) != 0;
-}
+static inline bool qiszero(Sleef_quad a) { return Sleef_icmpeqq1(a, QBLAS_ZERO) != 0; }
+static inline bool qisone(Sleef_quad a)  { return Sleef_icmpeqq1(a, QBLAS_ONE)  != 0; }
 
-/* -----------------------------------------------------------------------
- * Stride-aware accessor.  BLAS allows negative `incx`: when incx < 0 the
- * vector is walked from index (n-1)*|incx| down to 0.  This helper hides
- * that detail.
- * --------------------------------------------------------------------- */
+/* For incx<0 the vector starts at the high end and walks back. */
 static inline ptrdiff_t qblas_stride_offset(int incx, int n) {
     return (incx < 0) ? (ptrdiff_t)(n - 1) * (ptrdiff_t)(-incx) : 0;
 }
 
-/* -----------------------------------------------------------------------
- * Memory alignment helpers.
- * --------------------------------------------------------------------- */
 #define QBLAS_ALIGN 64
 
 void *qblas_aligned_alloc(size_t bytes);
 void  qblas_aligned_free(void *p);
 
-/* -----------------------------------------------------------------------
- * CPU dispatch — populated once at library init.
- *
- * `qblas_cpu_tier` is the highest-supported tier id; we use string ids so
- * we can log them and dispatch via string compare (cheap, once at init).
- * --------------------------------------------------------------------- */
 typedef enum {
     QBLAS_TIER_GENERIC = 0,
     QBLAS_TIER_SSE2    = 1,
@@ -77,51 +50,29 @@ typedef enum {
 
 QBLAS_API qblas_cpu_tier_t qblas_cpu_tier(void);
 
-/* -----------------------------------------------------------------------
- * Threading helpers (always available; degrade gracefully without OpenMP).
- * --------------------------------------------------------------------- */
 int qblas_resolve_threads(size_t work_units, size_t per_unit_cost);
 
-/* -----------------------------------------------------------------------
- * Hardware-derived tunables.
- *
- * Populated once at library init by qblas_dispatch_init() from CPUID
- * cache descriptors (x86) / sysconf (POSIX).  All callers read the
- * runtime values, never the compile-time defaults.
- *
- * The compile-time defaults below are safety nets used only when
- * detection fails (or before init has run).
- * --------------------------------------------------------------------- */
+/* Runtime tunables populated once by qblas_dispatch_init() from CPUID /
+ * sysconf / a timed empty OpenMP region. */
 typedef struct {
-    /* Cache sizes in bytes, per-core. */
     size_t l1_data;
     size_t l2;
     size_t l3;
-    /* Physical core count (best-effort; may equal logical count). */
     int    cores;
-    /* L1 thread-fork threshold in *elements*. Computed so the work
-     * exceeds the measured fork/join overhead. */
-    size_t l1_thread_threshold;
-    /* GEMV thread-fork threshold in m*n elements. */
-    size_t gemv_thread_threshold;
-    /* Goto blocking parameters for GEMM, in *elements*. */
+    size_t l1_thread_threshold;     /* elements */
+    size_t gemv_thread_threshold;   /* m*n elements */
     size_t gemm_mc;
     size_t gemm_kc;
     size_t gemm_nc;
-    /* Measured OpenMP fork/join overhead in CPU cycles. */
     size_t omp_overhead_cycles;
 } qblas_tune_t;
 
 QBLAS_API const qblas_tune_t *qblas_tune(void);
 
-/* Safe defaults used before init runs and as fallbacks. */
 #define QBLAS_PARALLEL_THRESHOLD_L1_DEFAULT   16384
 #define QBLAS_PARALLEL_THRESHOLD_GEMV_DEFAULT 16384
 #define QBLAS_PARALLEL_THRESHOLD_GEMM         64
 
-/* -----------------------------------------------------------------------
- * Branch hints.
- * --------------------------------------------------------------------- */
 #if defined(__GNUC__) || defined(__clang__)
 #  define QBLAS_LIKELY(x)   __builtin_expect(!!(x), 1)
 #  define QBLAS_UNLIKELY(x) __builtin_expect(!!(x), 0)
@@ -135,7 +86,7 @@ QBLAS_API const qblas_tune_t *qblas_tune(void);
 #endif
 
 #ifdef __cplusplus
-} /* extern "C" */
+}
 #endif
 
-#endif /* QBLAS_INTERNAL_H */
+#endif

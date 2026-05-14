@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Build SLEEF with full SIMD path coverage (sse2/avx2/avx512f on x86, advsimd
-# on aarch64) and install into the repo-local prefix .sleef-prefix/.  This
-# is what the top-level CMakeLists.txt finds by default.
-#
-# Why a script: SLEEF's default CMake config only builds for the host CPU,
-# so a binary built on this machine would have no SSE2 quad path and would
-# crash on older CPUs.  Forcing every tier on guarantees runtime portability.
+# Build SLEEF with all SIMD paths enabled and install into .sleef-prefix/.
+# SLEEF's default build only emits host-CPU paths, which would crash on
+# older CPUs at runtime once qblas dispatches to a lower tier.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -43,8 +39,8 @@ cmake --build "${sleef_build}" --parallel "${NJOBS}"
 rm -rf "${prefix}"
 cmake --install "${sleef_build}"
 
-# SLEEF's install rules don't include the vendored libtlfloat artifact; copy
-# it manually so binaries can load it via rpath/runpath.
+# libtlfloat is built by SLEEF but not installed; copy it in so rpath
+# resolution finds it.
 tl_dir="${sleef_build}/ext_tlfloat-prefix/src/ext_tlfloat-build/lib"
 if [[ -d "${tl_dir}" ]]; then
     if [[ "$(uname)" == "Darwin" ]]; then

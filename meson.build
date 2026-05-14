@@ -1,10 +1,5 @@
-# Meson build for QBLAS — equivalent to the CMake build but designed to
-# be consumable as a Meson subproject by downstream packages (notably
-# numpy-quaddtype).
-#
-# Produces a static library `libqblas.a` plus a `qblas_dep` dependency
-# that includes both the public headers and the link line.  Downstream
-# only needs to do `dependency('qblas', fallback: ['qblas', 'qblas_dep'])`.
+# Mirrors the CMake build for use as a Meson subproject by downstream
+# packages (notably numpy-quaddtype).  Produces libqblas.a + qblas_dep.
 
 project('qblas', 'c',
         version: '0.1.0',
@@ -13,22 +8,10 @@ project('qblas', 'c',
 
 cc = meson.get_compiler('c')
 
-# ---------------------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------------------
-# SLEEF resolution.  Two cases:
-#
-#  * Used as a subproject (e.g. by numpy-quaddtype): the parent project
-#    is expected to ship its own sleef.wrap.  We force-load that single
-#    instance via subproject() so that *both* libsleef and libsleefquad
-#    come from the SAME build.  Falling back to plain dependency() would
-#    risk picking up a system SLEEF for one library while the subproject
-#    builds the other — a real bug we hit on dev boxes with a stray
-#    system SLEEF installation.
-#
-#  * Standalone build: try pkg-config (which downstream installs do
-#    populate), then fall back to a plain library lookup against -L
-#    paths the caller has set.
+# When invoked as a subproject we force-load the parent's sleef.wrap so
+# libsleef and libsleefquad come from the same build (a stray system
+# SLEEF can otherwise satisfy one half but not the other).  Standalone
+# builds use pkg-config / cc.find_library.
 if meson.is_subproject()
     sleef_subproj = subproject('sleef')
     sleef_dep     = sleef_subproj.get_variable('sleef_dep')
@@ -45,16 +28,9 @@ else
 endif
 
 openmp_dep = dependency('openmp', required: false)
-if openmp_dep.found()
-    omp_args = ['-DQBLAS_USE_OPENMP=1']
-else
-    omp_args = []
-endif
+omp_args = openmp_dep.found() ? ['-DQBLAS_USE_OPENMP=1'] : []
 
-# ---------------------------------------------------------------------
-# Architecture / per-ISA tier discovery
-# ---------------------------------------------------------------------
-arch = host_machine.cpu_family()
+arch   = host_machine.cpu_family()
 is_x86 = (arch == 'x86_64' or arch == 'x86')
 is_arm = (arch == 'aarch64' or arch == 'arm64')
 
@@ -80,14 +56,8 @@ isa_has_defines = {
     'neon'   : '-DQBLAS_HAS_NEON=1',
 }
 
-# Build each ISA tier as a static library, then aggregate.
 qblas_inc = include_directories('include', 'src')
 qblas_core_args = ['-O3', '-D_POSIX_C_SOURCE=200809L'] + omp_args
-foreach tier : isa_tiers
-    foreach d : isa_has_defines.keys()
-        # nothing — we add all tier flags to the main lib below
-    endforeach
-endforeach
 
 tier_libs = []
 foreach tier : isa_tiers
@@ -102,8 +72,7 @@ foreach tier : isa_tiers
     tier_libs += tier_lib
 endforeach
 
-# Per-arch HAS_* defines for the core (so qblas_cpu.c knows which
-# tier-registration functions are available to call).
+# qblas_cpu.c needs to know which tier registration functions exist.
 core_defines = ['-DQBLAS_HAS_GENERIC=1']
 if is_x86
     core_defines += ['-DQBLAS_HAS_SSE2=1', '-DQBLAS_HAS_AVX2=1', '-DQBLAS_HAS_AVX512=1']

@@ -1,14 +1,4 @@
-/* QBLAS - High-performance quad-precision BLAS on top of SLEEF.
- *
- * This is the umbrella C header. It pulls in the CBLAS-style API plus
- * library-wide control routines (threading, dispatch info, version).
- *
- * The quad scalar type is `Sleef_quad` (defined by SLEEF). Memory layouts
- * follow CBLAS conventions: `QblasRowMajor` / `QblasColMajor`, and transpose
- * specifiers `QblasNoTrans` / `QblasTrans` / `QblasConjTrans` (the conjugate
- * variant is accepted for source-compat with CBLAS — quad is real, so it
- * behaves identically to `QblasTrans`).
- */
+/* QBLAS - quad-precision BLAS built on SLEEF.  CBLAS-style C API. */
 #ifndef QBLAS_H
 #define QBLAS_H
 
@@ -29,7 +19,6 @@
 extern "C" {
 #endif
 
-/* CBLAS-style enums (kept binary-compatible with cblas.h ints) */
 typedef enum {
     QblasRowMajor = 101,
     QblasColMajor = 102
@@ -56,10 +45,11 @@ typedef enum {
     QblasRight = 142
 } QBLAS_SIDE;
 
-/* Library control */
 QBLAS_API const char *qblas_get_version(void);
-QBLAS_API const char *qblas_get_dispatch_tier(void); /* "avx512" | "avx2" | "sse2" | "neon" | "generic" */
+QBLAS_API const char *qblas_get_dispatch_tier(void);
 
+/* qblas_set_num_threads() caps qblas's own work distribution only;
+ * it does not call omp_set_num_threads. */
 QBLAS_API void qblas_set_num_threads(int n);
 QBLAS_API int  qblas_get_num_threads(void);
 QBLAS_API int  qblas_get_max_threads(void);
@@ -69,7 +59,7 @@ QBLAS_API int  qblas_get_max_threads(void);
 #include "qblas_level3.h"
 
 #ifdef __cplusplus
-} /* extern "C" */
+}
 #endif
 
-#endif /* QBLAS_H */
+#endif

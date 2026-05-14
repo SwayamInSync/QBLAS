@@ -1,15 +1,6 @@
-/* CPU feature detection + global library init (dispatch table population).
- *
- * On x86_64 we use the CPUID instruction (via <cpuid.h>).  We never assume
- * runtime support for an ISA that the binary wasn't compiled to contain,
- * so each kernel TU is opt-in: a tier's kernel symbols are only registered
- * if its preprocessor guard is enabled (QBLAS_HAS_AVX2, etc).
- */
-
 #include "common/qblas_internal.h"
 #include "common/qblas_dispatch.h"
 
-/* Request POSIX clock_gettime / sysconf even on conservative libcs. */
 #ifndef _POSIX_C_SOURCE
 #  define _POSIX_C_SOURCE 200809L
 #endif
@@ -36,7 +27,6 @@
 static qblas_cpu_tier_t g_tier = QBLAS_TIER_GENERIC;
 static int g_initialized = 0;
 static qblas_tune_t g_tune = {
-    /* Conservative defaults; overwritten at init. */
     .l1_data = 32 * 1024,
     .l2      = 256 * 1024,
     .l3      = 8  * 1024 * 1024,
@@ -50,21 +40,16 @@ static qblas_tune_t g_tune = {
 };
 const qblas_tune_t *qblas_tune(void) { return &g_tune; }
 
-/* ---------- CPUID helpers (x86 only) ---------- */
 #ifdef QBLAS_X86_64
 static int has_xgetbv_avx_state(void) {
-    /* Need OS to enable XMM/YMM state for AVX, ZMM/K state for AVX-512. */
     unsigned int eax, edx;
-    /* xgetbv 0 */
     __asm__ __volatile__("xgetbv" : "=a"(eax), "=d"(edx) : "c"(0));
-    /* bit 1 = XMM, bit 2 = YMM */
-    return (eax & 0x6) == 0x6;
+    return (eax & 0x6) == 0x6;             /* XMM | YMM */
 }
 static int has_xgetbv_avx512_state(void) {
     unsigned int eax, edx;
     __asm__ __volatile__("xgetbv" : "=a"(eax), "=d"(edx) : "c"(0));
-    /* bits 5,6,7 = opmask, ZMM_Hi256, Hi16_ZMM */
-    return (eax & 0xE6) == 0xE6;
+    return (eax & 0xE6) == 0xE6;           /* + opmask | ZMM_Hi256 | Hi16_ZMM */
 }
 #endif
 
@@ -87,8 +72,7 @@ static qblas_cpu_tier_t detect_tier(void) {
         has_avx512dq = (ebx & (1u << 17)) != 0;
     }
 
-    /* OS support check via XGETBV - only valid if OSXSAVE is set. */
-    int avx_ok = has_osxsave && has_avx && has_xgetbv_avx_state();
+    int avx_ok    = has_osxsave && has_avx && has_xgetbv_avx_state();
     int avx512_ok = avx_ok && has_xgetbv_avx512_state();
 
 #ifdef QBLAS_HAS_AVX512
@@ -113,32 +97,25 @@ static qblas_cpu_tier_t detect_tier(void) {
 #endif
 }
 
-/* ---------- Cache hierarchy detection ---------- */
-/* On x86 we read CPUID leaf 4 (deterministic cache parameters).
- * On POSIX we fall back to sysconf which works on Linux for L1 size at least.
- * On failure we keep the static defaults. */
 static void detect_caches(qblas_tune_t *t) {
 #ifdef QBLAS_X86_64
-    /* Leaf 4 iterates over caches; index 0 = L1d, 1 = L1i, 2 = L2, 3 = L3 typically. */
     for (unsigned i = 0; i < 8; ++i) {
         unsigned int a, b, c, d;
         if (!__get_cpuid_count(4, i, &a, &b, &c, &d)) break;
         unsigned type   = a & 0x1F;
-        if (type == 0) break;                /* no more caches */
+        if (type == 0) break;
         unsigned level  = (a >> 5) & 0x7;
-        /* Cache size = (ways+1)*(partitions+1)*(line_size+1)*(sets+1) */
+        /* cache size = (ways+1) * (partitions+1) * (line_size+1) * (sets+1) */
         unsigned ways       = ((b >> 22) & 0x3FF) + 1;
         unsigned partitions = ((b >> 12) & 0x3FF) + 1;
         unsigned line_size  = (b & 0xFFF) + 1;
         unsigned sets       = c + 1;
         size_t cache_bytes  = (size_t)ways * partitions * line_size * sets;
-        /* type 1 = data, type 2 = instruction, type 3 = unified */
-        if (level == 1 && type != 2) t->l1_data = cache_bytes;
-        else if (level == 2 && type != 2) t->l2 = cache_bytes;
-        else if (level == 3 && type != 2) t->l3 = cache_bytes;
+        if      (level == 1 && type != 2) t->l1_data = cache_bytes;
+        else if (level == 2 && type != 2) t->l2      = cache_bytes;
+        else if (level == 3 && type != 2) t->l3      = cache_bytes;
     }
 #else
-    /* POSIX fallback: only L1 is reliably exposed. */
 #  ifdef _SC_LEVEL1_DCACHE_SIZE
     long v = sysconf(_SC_LEVEL1_DCACHE_SIZE); if (v > 0) t->l1_data = (size_t)v;
 #  endif
@@ -153,28 +130,22 @@ static void detect_caches(qblas_tune_t *t) {
     t->cores = (ncpu > 0) ? (int)ncpu : 1;
 }
 
-/* Time one CLOCK_MONOTONIC nanosecond. */
 static inline uint64_t ts_ns(void) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/* Measure the per-spawn cost of an empty OpenMP parallel region.  This gives
- * us a real fork/join number for the host machine instead of guessing — on a
- * tiny laptop with libgomp it's a few µs; on libomp tuned servers it can be
- * under a µs.  We then convert to "cycles" using a rough 3 GHz estimate so
- * the cost units match qblas_resolve_threads's quad-FMA-cycle accounting. */
+/* Measures the cost of an empty parallel region so qblas_resolve_threads
+ * can decide if a piece of work justifies forking. */
 static size_t measure_omp_overhead_cycles(int max_threads) {
 #ifdef _OPENMP
-    if (max_threads <= 1) return 1; /* irrelevant */
-    /* Warm up the thread pool. */
+    if (max_threads <= 1) return 1;
     int warm = 0;
     for (int i = 0; i < 4; ++i) {
         #pragma omp parallel num_threads(max_threads) reduction(+:warm)
         warm += 1;
     }
     (void)warm;
-    /* Time many empty parallel regions. */
     const int iters = 256;
     uint64_t t0 = ts_ns();
     int sink = 0;
@@ -185,9 +156,7 @@ static size_t measure_omp_overhead_cycles(int max_threads) {
     uint64_t t1 = ts_ns();
     (void)sink;
     double ns_per_spawn = (double)(t1 - t0) / iters;
-    /* Convert at ~3 GHz; not exact but the absolute number isn't critical —
-     * what matters is the *ratio* to per-op cost in qblas_resolve_threads. */
-    size_t cycles = (size_t)(ns_per_spawn * 3.0);
+    size_t cycles = (size_t)(ns_per_spawn * 3.0);   /* approx at 3 GHz */
     if (cycles < 1024) cycles = 1024;
     if (cycles > 1u << 20) cycles = 1u << 20;
     return cycles;
@@ -197,47 +166,28 @@ static size_t measure_omp_overhead_cycles(int max_threads) {
 #endif
 }
 
-/* Derive runtime tunables once caches + thread count + omp overhead are known. */
 static void derive_tunables(qblas_tune_t *t) {
-    /* L1 threshold: switch to threaded when total quad-op cycles exceed
-     * fork-cost.  Each quad op is ~32 cycles, so threshold in elements is
-     * ~ omp_overhead / 32.  Floor 1024 — below that even threading overhead
-     * dominates regardless of CPU.  The ratio /16 instead of /32 gives ~2×
-     * headroom on the break-even point, matching empirical observations. */
     size_t l1_thr = t->omp_overhead_cycles / 16;
-    if (l1_thr < 1024) l1_thr = 1024;
+    if (l1_thr < 1024)  l1_thr = 1024;
     if (l1_thr > 16384) l1_thr = 16384;
-    t->l1_thread_threshold = l1_thr;
+    t->l1_thread_threshold   = l1_thr;
     t->gemv_thread_threshold = l1_thr * 2;
 
-    /* GEMM blocking from cache sizes.
-     *   kc panel size: keep MR*kc + kc*NR + MR*NR (the live micro-kernel
-     *   working set) under L1/2.  MR=NR=4, quad=16 bytes:
-     *     2*4*kc*16 + 4*4*16 = 128*kc + 256  ≤ L1/2
-     *     kc ≤ (L1/2 - 256) / 128
-     *   mc: A panel mc*kc must fit L2/2 → mc ≤ L2/(2*kc*16).
-     *   nc: B panel kc*nc must fit L3/threads → nc ≤ L3/(cores*kc*16). */
+    /* GEMM blocking sized to fit the live micro-kernel set in L1, A panel
+     * in ~80% of L2, B panel in L3. quad = 16 bytes per element. */
     const size_t MR = 4, NR = 4, quad_bytes = 16;
     size_t kc = (t->l1_data / 2 - MR*NR*quad_bytes) / ((MR + NR) * quad_bytes);
     if (kc > 256) kc = 256;
     if (kc < 32)  kc = 32;
-    /* Round down to multiple of 8 for clean unroll. */
     kc &= ~(size_t)7;
     t->gemm_kc = kc;
 
-    /* OpenBLAS sizes its A panel close to the full L2 (the B panel slice and
-     * C tile are streamed, not retained), so we use ~80 % of L2 for A. */
     size_t mc = (t->l2 * 4) / (5 * kc * quad_bytes);
     if (mc > 512) mc = 512;
     if (mc < MR)  mc = MR;
     mc -= mc % MR;
     t->gemm_mc = mc;
 
-    /* nc is the ceiling on a B-panel.  OpenBLAS uses nc ~ L3/(kc*sizeof),
-     * NOT L3/cores — per-thread parallelism is handled by the caller, which
-     * subdivides nc-blocks across threads.  Make this a generous ceiling
-     * (whole-L3 / kc) and let qblas_gemm()'s nc-scaling do the right thing
-     * for small problems with many threads. */
     size_t nc = t->l3 / (kc * quad_bytes);
     if (nc > 4096) nc = 4096;
     if (nc < NR)   nc = NR;
@@ -260,7 +210,6 @@ qblas_cpu_tier_t qblas_cpu_tier(void) {
     return g_tier;
 }
 
-/* ---------- Dispatch table definitions ---------- */
 qdot_fn   qblas_dispatch_qdot   = NULL;
 qaxpy_fn  qblas_dispatch_qaxpy  = NULL;
 qscal_fn  qblas_dispatch_qscal  = NULL;
@@ -272,8 +221,6 @@ qgemm_kernel_fn qblas_dispatch_qgemm_kernel = NULL;
 size_t qblas_dispatch_qgemm_MR = 0;
 size_t qblas_dispatch_qgemm_NR = 0;
 
-/* Forward decls for kernel registries.  Each tier registers its kernels
- * by name; the registration symbol exists only when that tier is built. */
 void qblas_register_generic(void);
 #ifdef QBLAS_HAS_SSE2
 void qblas_register_sse2(void);
@@ -291,14 +238,10 @@ void qblas_register_neon(void);
 void qblas_dispatch_init(void) {
     if (g_initialized) return;
 
-    /* Always start with generic so every pointer is non-NULL. */
     qblas_register_generic();
 
     g_tier = detect_tier();
 
-    /* Discover the host's cache hierarchy and thread count, then time the
-     * cost of an empty OpenMP region.  Everything downstream (parallel
-     * thresholds, GEMM blocking) reads from g_tune. */
     detect_caches(&g_tune);
 #ifdef _OPENMP
     int max_threads = omp_get_max_threads();
@@ -308,7 +251,6 @@ void qblas_dispatch_init(void) {
     g_tune.omp_overhead_cycles = measure_omp_overhead_cycles(max_threads);
     derive_tunables(&g_tune);
 
-    /* Upgrade to richer tiers in order; later overrides win. */
 #ifdef QBLAS_HAS_SSE2
     if (g_tier >= QBLAS_TIER_SSE2) qblas_register_sse2();
 #endif
@@ -322,10 +264,8 @@ void qblas_dispatch_init(void) {
     if (g_tier >= QBLAS_TIER_AVX512) qblas_register_avx512();
 #endif
 
-    /* Honour env override: QBLAS_DISPATCH=generic|sse2|avx2|avx512|neon.
-     * Only allow tiers the actual CPU supports — otherwise we'd register
-     * (say) AVX-512 kernels on a Zen 3 box and SIGILL on the first FMA.
-     * The auto-detected `g_tier` from CPUID is the ceiling. */
+    /* QBLAS_DISPATCH=tier_name forces a tier the binary contains *and* the
+     * CPU supports; otherwise the override is reported and dropped. */
     qblas_cpu_tier_t auto_tier = g_tier;
     const char *env = getenv("QBLAS_DISPATCH");
     if (env) {
@@ -337,9 +277,6 @@ void qblas_dispatch_init(void) {
         else if (strcmp(env, "avx512")  == 0) want = QBLAS_TIER_AVX512;
 
         if ((int)want >= 0 && (int)want > (int)auto_tier) {
-            /* Print warning using a local string lookup; do NOT call
-             * qblas_get_dispatch_tier() here — it would recurse back into
-             * qblas_dispatch_init via the lazy-init check. */
             const char *auto_name;
             switch (auto_tier) {
             case QBLAS_TIER_AVX512: auto_name = "avx512"; break;
@@ -379,16 +316,12 @@ void qblas_dispatch_init(void) {
     g_initialized = 1;
 }
 
-/* Library constructor: detect once and populate. */
 __attribute__((constructor))
 static void qblas_lib_init(void) { qblas_dispatch_init(); }
 
-/* ---------- Public library control ---------- */
 const char *qblas_get_version(void) { return "QBLAS 0.1.0"; }
 
-/* ---------- Aligned alloc / free ---------- */
 void *qblas_aligned_alloc(size_t bytes) {
-    /* Round up to multiple of alignment to satisfy posix_memalign. */
     size_t rounded = (bytes + QBLAS_ALIGN - 1) & ~(size_t)(QBLAS_ALIGN - 1);
     void *p = NULL;
     if (posix_memalign(&p, QBLAS_ALIGN, rounded == 0 ? QBLAS_ALIGN : rounded) != 0) return NULL;
@@ -396,20 +329,13 @@ void *qblas_aligned_alloc(size_t bytes) {
 }
 void qblas_aligned_free(void *p) { free(p); }
 
-/* ---------- Threading ---------- */
 #ifdef _OPENMP
-static int g_user_thread_cap = 0; /* 0 = follow omp default */
+static int g_user_thread_cap = 0;
 #endif
 
-/* qblas owns no OpenMP state.  It reads `omp_get_max_threads()` (which
- * reflects OMP_NUM_THREADS / the host's omp_set_num_threads call) and
- * uses that as a ceiling, optionally further capped by `g_user_thread_cap`.
- *
- * Calling qblas_set_num_threads(N) does NOT call omp_set_num_threads;
- * it only narrows qblas's own work-distribution.  This is the right
- * behaviour for libraries: a BLAS shouldn't silently mutate the host
- * application's process-wide OMP setting.  If you want fewer global
- * threads, set OMP_NUM_THREADS or call omp_set_num_threads yourself. */
+/* qblas_set_num_threads only caps qblas-internal work distribution; it
+ * never calls omp_set_num_threads, so the host application's OpenMP
+ * state is left alone. */
 void qblas_set_num_threads(int n) {
 #ifdef _OPENMP
     g_user_thread_cap = n > 0 ? n : 0;
@@ -419,7 +345,6 @@ void qblas_set_num_threads(int n) {
 }
 int qblas_get_num_threads(void) {
 #ifdef _OPENMP
-    /* Effective ceiling = host OMP setting, capped by qblas user cap. */
     int omp_max = omp_get_max_threads();
     if (g_user_thread_cap > 0 && g_user_thread_cap < omp_max)
         return g_user_thread_cap;
@@ -436,19 +361,9 @@ int qblas_get_max_threads(void) {
 #endif
 }
 
-/* Decide how many threads to actually use for a piece of work.  Avoids
- * paying parallel-region overhead when the work is too small.
- *
- * The measured `omp_overhead_cycles` is what one *empty* parallel region
- * costs when spawning all available threads.  For a parallel region to
- * be a net win every thread must have at least `omp_overhead_cycles` of
- * useful work to do.  So:
- *
- *    per_thread_work_cycles >= overhead   ⇒  threaded
- *    work_cycles / n_threads >= overhead  ⇒  n_threads <= work / overhead
- *
- * That naturally yields fewer threads on small problems even on big
- * machines, instead of always picking `max_threads` and paying for it. */
+/* Returns a thread count where each thread has at least one omp_overhead
+ * worth of work; small problems and big machines naturally pick small
+ * thread counts instead of fanning out and paying for fork/join. */
 int qblas_resolve_threads(size_t work_units, size_t per_unit_cost) {
 #ifdef _OPENMP
     int max = omp_get_max_threads();
@@ -459,12 +374,7 @@ int qblas_resolve_threads(size_t work_units, size_t per_unit_cost) {
     if (overhead < 1024) overhead = 1024;
     size_t total_cycles = work_units * per_unit_cost * quad_cycles_per_op;
     if (total_cycles < overhead * 2) return 1;
-    /* Pick the largest thread count that still gives each thread at least
-     * `overhead` cycles of work.  Capping more aggressively (factor > 1)
-     * hurt small-GEMM perf in practice because it cut the nc-block count
-     * below what the kernel needs to keep all hardware fetchers busy. */
     size_t t = total_cycles / overhead;
-    if (t < 2) t = 2;
     if ((int)t > max) t = (size_t)max;
     if (g_user_thread_cap && (int)t > g_user_thread_cap) t = (size_t)g_user_thread_cap;
     if (t < 1) t = 1;

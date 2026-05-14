@@ -1,13 +1,6 @@
-"""ctypes wrapper around libqblas via a small pointer-only shim.
-
-Why a shim: the standard CBLAS-style entry points (`cblas_qgemm` etc.)
-take `Sleef_quad` scalars by value.  `Sleef_quad` is a 16-byte struct of
-two `uint64_t`; SysV AMD64 ABI passes it in two integer registers but
-ctypes/libffi does not reliably implement that, leading to bus errors
-when ctypes pushes the struct onto the stack misaligned.  `qblas_shim.c`
-re-exposes every entry point with `Sleef_quad *` (pointer) arguments,
-which ctypes handles correctly across versions.
-"""
+"""ctypes wrapper around libqblas via qblas_shim.so.  The shim re-exports
+every entry point with Sleef_quad scalars passed by pointer, since
+ctypes / libffi does not reliably handle 16-byte struct-by-value args."""
 
 from __future__ import annotations
 
@@ -26,24 +19,19 @@ def _load(libpath, name: str):
         raise FileNotFoundError(f"{name} not found at {p}")
     return ctypes.CDLL(str(p), mode=ctypes.RTLD_GLOBAL)
 
-# Load NEEDED chain top-down so symbols resolve.
+# Load NEEDED chain in dependency order.
 _tlfloat   = _load(os.environ.get("QBLAS_TEST_TLFLOAT",   SLEEF_LIBDIR / "libtlfloat.so.1"),   "libtlfloat")
 _sleef     = _load(os.environ.get("QBLAS_TEST_SLEEF",     SLEEF_LIBDIR / "libsleef.so"),       "libsleef")
 _sleefquad = _load(os.environ.get("QBLAS_TEST_SLEEFQUAD", SLEEF_LIBDIR / "libsleefquad.so"),   "libsleefquad")
 _qblas     = _load(os.environ.get("QBLAS_TEST_QBLAS",     REPO / "build" / "src" / "libqblas.so"), "libqblas")
 _shim      = _load(os.environ.get("QBLAS_TEST_SHIM",      REPO / "build" / "libqblas_shim.so"),    "libqblas_shim")
 
-
-# ----------------------------------------------------------------------
-# Sleef_quad: 16-byte struct.  We only ever pass it by pointer.
-# ----------------------------------------------------------------------
 class Quad(ctypes.Structure):
     _fields_ = [("x", ctypes.c_uint64), ("y", ctypes.c_uint64)]
 
 QUAD_DTYPE = np.dtype([("x", "<u8"), ("y", "<u8")])
 assert QUAD_DTYPE.itemsize == 16
 
-# Shim scalar helpers
 _shim.shim_d2q.argtypes = [ctypes.c_double, ctypes.POINTER(Quad)]
 _shim.shim_d2q.restype  = None
 _shim.shim_q2d.argtypes = [ctypes.POINTER(Quad)]
@@ -74,10 +62,6 @@ def quads_to_doubles(qs: np.ndarray) -> np.ndarray:
         out[i] = q2d(q)
     return out
 
-
-# ----------------------------------------------------------------------
-# QBLAS enums.
-# ----------------------------------------------------------------------
 QblasRowMajor = 101
 QblasColMajor = 102
 QblasNoTrans  = 111
@@ -89,10 +73,6 @@ QblasUnit     = 132
 QblasLeft     = 141
 QblasRight    = 142
 
-
-# ----------------------------------------------------------------------
-# Library control (these use scalar return types, no Quad-by-value).
-# ----------------------------------------------------------------------
 _qblas.qblas_get_dispatch_tier.restype = ctypes.c_char_p
 def dispatch_tier() -> str:
     return _qblas.qblas_get_dispatch_tier().decode()
@@ -101,10 +81,6 @@ _qblas.qblas_get_num_threads.restype = ctypes.c_int
 def num_threads() -> int:
     return int(_qblas.qblas_get_num_threads())
 
-
-# ----------------------------------------------------------------------
-# Shim function bindings — all pointer / int based, ABI-safe.
-# ----------------------------------------------------------------------
 PQ = ctypes.POINTER(Quad)
 VP = ctypes.c_void_p
 INT = ctypes.c_int
@@ -134,11 +110,6 @@ _shim.shim_qtrmm.argtypes = [INT, INT, INT, INT, INT, INT, INT, PQ, VP, INT, VP,
 _shim.shim_qtrmm.restype  = None
 _shim.shim_qtrsm.argtypes = [INT, INT, INT, INT, INT, INT, INT, PQ, VP, INT, VP, INT]
 _shim.shim_qtrsm.restype  = None
-
-
-# ----------------------------------------------------------------------
-# Pythonic wrappers.
-# ----------------------------------------------------------------------
 
 def _quad_buf(arr_f64):
     buf = doubles_to_quads(arr_f64)

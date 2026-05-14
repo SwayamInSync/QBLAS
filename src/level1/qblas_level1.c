@@ -1,7 +1,3 @@
-/* Public Level 1 entry points.  Each routine validates inputs, decides whether
- * to thread the work, and delegates to the dispatch-table kernel.  Threading
- * for Level 1 is parallel-for over disjoint contiguous slices. */
-
 #include "common/qblas_internal.h"
 #include "common/qblas_dispatch.h"
 
@@ -13,7 +9,6 @@ static inline ptrdiff_t neg_offset(int inc, int n) {
     return (inc < 0) ? (ptrdiff_t)(n - 1) * (ptrdiff_t)(-inc) : 0;
 }
 
-/* ------------------------------------------------------------------ */
 Sleef_quad cblas_qdot(int n,
                       const Sleef_quad *x, int incx,
                       const Sleef_quad *y, int incy) {
@@ -41,24 +36,18 @@ Sleef_quad cblas_qdot(int n,
         }
         return qblas_dispatch_qdot((size_t)n, x, 1, y, 1);
     }
-    /* Strided: rebase pointers for negative strides so the kernel doesn't
-     * have to. */
     ptrdiff_t ox = neg_offset(incx, n);
     ptrdiff_t oy = neg_offset(incy, n);
     return qblas_dispatch_qdot((size_t)n, x + ox, (ptrdiff_t)incx,
                                             y + oy, (ptrdiff_t)incy);
 }
 
-/* ------------------------------------------------------------------ */
 Sleef_quad cblas_qnrm2(int n, const Sleef_quad *x, int incx) {
     if (n <= 0) return QBLAS_ZERO;
-    /* dot(x,x) is sufficient — no overflow guard for now; quad range
-     * covers ~10^4932 so true overflow is extremely rare in practice. */
     Sleef_quad s = cblas_qdot(n, x, incx, x, incx);
     return qsqrt(s);
 }
 
-/* ------------------------------------------------------------------ */
 Sleef_quad cblas_qasum(int n, const Sleef_quad *x, int incx) {
     if (n <= 0) return QBLAS_ZERO;
     if (incx == 1) {
@@ -88,14 +77,12 @@ Sleef_quad cblas_qasum(int n, const Sleef_quad *x, int incx) {
     return qblas_dispatch_qasum((size_t)n, x + ox, (ptrdiff_t)incx);
 }
 
-/* ------------------------------------------------------------------ */
 size_t cblas_iqamax(int n, const Sleef_quad *x, int incx) {
     if (n <= 0) return 0;
     ptrdiff_t ox = neg_offset(incx, n);
     return qblas_dispatch_qiamax((size_t)n, x + ox, (ptrdiff_t)incx);
 }
 
-/* ------------------------------------------------------------------ */
 void cblas_qaxpy(int n, Sleef_quad alpha,
                  const Sleef_quad *x, int incx,
                  Sleef_quad *y,       int incy) {
@@ -125,7 +112,6 @@ void cblas_qaxpy(int n, Sleef_quad alpha,
     qblas_dispatch_qaxpy((size_t)n, alpha, x + ox, incx, y + oy, incy);
 }
 
-/* ------------------------------------------------------------------ */
 void cblas_qscal(int n, Sleef_quad alpha, Sleef_quad *x, int incx) {
     if (n <= 0) return;
     if (incx == 1) {
@@ -152,7 +138,6 @@ void cblas_qscal(int n, Sleef_quad alpha, Sleef_quad *x, int incx) {
     qblas_dispatch_qscal((size_t)n, alpha, x + ox, incx);
 }
 
-/* ------------------------------------------------------------------ */
 void cblas_qcopy(int n,
                  const Sleef_quad *x, int incx,
                  Sleef_quad *y,       int incy) {
@@ -170,7 +155,6 @@ void cblas_qcopy(int n,
     }
 }
 
-/* ------------------------------------------------------------------ */
 void cblas_qswap(int n,
                  Sleef_quad *x, int incx,
                  Sleef_quad *y, int incy) {

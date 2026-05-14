@@ -1,7 +1,6 @@
-/* syrk, trmm, trsm correctness. */
+
 #include "test_helpers.h"
 
-/* Naive symm/syrk reference, row-major. */
 static void ref_syrk_row(int doT, int n, int k,
                          Sleef_quad alpha,
                          const Sleef_quad *A, int lda,
@@ -33,7 +32,6 @@ static void test_syrk(int n, int k, QBLAS_LAYOUT layout, QBLAS_UPLO uplo, QBLAS_
     memcpy(C_ref, C_row, (size_t)n * n * sizeof(Sleef_quad));
     ref_syrk_row(doT, n, k, alpha, A_row, Acols, beta, C_ref, n);
 
-    /* Build A and C in requested layout. */
     Sleef_quad *A_use, *C_use; int lda, ldc;
     Sleef_quad *A_col=NULL, *C_col=NULL;
     if (layout == QblasRowMajor) {
@@ -54,13 +52,11 @@ static void test_syrk(int n, int k, QBLAS_LAYOUT layout, QBLAS_UPLO uplo, QBLAS_
 
     cblas_qsyrk(layout, uplo, trans, n, k, alpha, A_use, lda, beta, C_use, ldc);
 
-    /* Convert C_use back to row-major for triangle compare. */
     Sleef_quad *C_got = malloc((size_t)n * n * sizeof(Sleef_quad));
     if (layout == QblasRowMajor) memcpy(C_got, C_use, (size_t)n * n * sizeof(Sleef_quad));
     else for (int i = 0; i < n; ++i) for (int j = 0; j < n; ++j)
         C_got[(size_t)i * n + j] = C_use[(size_t)j * n + i];
 
-    /* Compare only the relevant triangle. */
     int fails = 0;
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
@@ -84,11 +80,9 @@ static void test_syrk(int n, int k, QBLAS_LAYOUT layout, QBLAS_UPLO uplo, QBLAS_
     free(C_ref); free(C_row); free(A_row);
 }
 
-/* trsm: solve op(A) X = alpha * B (Left).  Verify op(A) * X = alpha * B_orig.
- *
- * To keep the verifier simple we ALWAYS hold A and B in row-major internally
- * (Arow / B0_row) and only transpose them into a col-major buffer when the
- * test parameter says so. */
+/* Verify trsm by multiplying op(A)*X and comparing to alpha*B_orig.
+ * A and B are kept row-major; col-major paths transpose into a scratch
+ * buffer before being passed to qblas. */
 static inline Sleef_quad rowmaj_A(const Sleef_quad *A_row, int m, int i, int j) {
     return A_row[(size_t)i * m + j];
 }
@@ -106,7 +100,6 @@ static void test_trsm_left(int m, int n, QBLAS_LAYOUT layout,
     fill_mat(B_row, m, n, n);
     memcpy(B0_row, B_row, (size_t)m * n * sizeof(Sleef_quad));
 
-    /* Build the buffer in the requested layout. */
     Sleef_quad *A_use, *B_use; int lda, ldb;
     Sleef_quad *A_col = NULL, *B_col = NULL;
     if (layout == QblasRowMajor) {
@@ -127,17 +120,13 @@ static void test_trsm_left(int m, int n, QBLAS_LAYOUT layout,
     cblas_qtrsm(layout, QblasLeft, uplo, transa, diag, m, n,
                 alpha, A_use, lda, B_use, ldb);
 
-    /* Convert solved B back to row-major. */
     Sleef_quad *X_row = malloc((size_t)m * n * sizeof(Sleef_quad));
     if (layout == QblasRowMajor) memcpy(X_row, B_use, (size_t)m * n * sizeof(Sleef_quad));
     else for (int i = 0; i < m; ++i) for (int j = 0; j < n; ++j)
         X_row[(size_t)i * n + j] = B_use[(size_t)j * m + i];
 
-    /* Verify with the *backward error* of the solve:
-     *   ‖op(A)·X − alpha·B0‖_F / (‖A‖_F · ‖X‖_F + ‖alpha·B0‖_F)
-     * which is the right stability check for triangular solves and
-     * doesn't blow up element-wise even when the condition number is high
-     * (random unit triangular has κ that grows fast with m). */
+    /* Backward error: ‖op(A)·X − alpha·B0‖_F / (‖A‖_F·‖X‖_F + ‖alpha·B0‖_F)
+     * — the standard stability check for triangular solves. */
     int doT = (transa == QblasTrans);
     int upper = (uplo == QblasUpper);
     double res_sq = 0.0, denom_sq = 0.0, A_fro = 0.0, X_fro = 0.0, B_fro = 0.0;
@@ -182,9 +171,7 @@ static void test_trsm_left(int m, int n, QBLAS_LAYOUT layout,
     char tag[128];
     snprintf(tag, sizeof tag, "trsm m=%d n=%d layout=%d uplo=%d ta=%d diag=%d",
              m, n, layout, uplo, transa, diag);
-    /* Quad u05 FMA gives ~1e-34 per op; m*n ops total → ~m*n*1e-34 worst
-     * case.  We allow a generous 1e-25 ceiling which is still ~1e10 tighter
-     * than double precision. */
+    /* 1e-25 ceiling is ~10¹⁰ tighter than double-precision rounding. */
     CHECK(backward_err < 1e-25, "%s backward_err=%.3e", tag, backward_err);
     free(X_row);
     if (A_col) free(A_col);
@@ -202,8 +189,8 @@ int main(void) {
                               (QBLAS_UPLO)uplo, (QBLAS_TRANSPOSE)trans);
                 }
     }
-    /* trsm tests — include sizes both above and below the NB=64 block size
-     * so the blocked path and the small-problem fallback are both exercised. */
+
+    /* trsm size grid spans the NB=64 block-size boundary. */
     int td[][2] = { {3,3}, {8,5}, {17,11}, {63,17}, {64,33}, {129,11}, {200,40} };
     for (size_t d = 0; d < sizeof td / sizeof td[0]; ++d) {
         for (int layout = QblasRowMajor; layout <= QblasColMajor; ++layout)

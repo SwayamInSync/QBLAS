@@ -1,4 +1,3 @@
-/* GEMM correctness: all combinations of layout x transA x transB x sizes. */
 #include "test_helpers.h"
 
 static void ref_gemm_row(int doTa, int doTb, int m, int n, int k,
@@ -21,7 +20,6 @@ static void ref_gemm_row(int doTa, int doTb, int m, int n, int k,
     }
 }
 
-/* Convert A row-major (rows x cols, lda=cols) to col-major (lda=rows). */
 static void rowmajor_to_colmajor(const Sleef_quad *A, int rows, int cols,
                                  Sleef_quad *B) {
     for (int i = 0; i < rows; ++i)
@@ -35,7 +33,6 @@ static void test_gemm_case(int m, int n, int k,
     int doTa = (ta == QblasTrans || ta == QblasConjTrans);
     int doTb = (tb == QblasTrans || tb == QblasConjTrans);
 
-    /* Logical sizes (always row-major reference) */
     int Arows = doTa ? k : m, Acols = doTa ? m : k;
     int Brows = doTb ? n : k, Bcols = doTb ? k : n;
 
@@ -48,13 +45,11 @@ static void test_gemm_case(int m, int n, int k,
 
     Sleef_quad alpha = qd(0.6), beta = qd(-0.4);
 
-    /* Reference: compute on row-major copy. */
     Sleef_quad *C_ref = malloc((size_t)m * n * sizeof(Sleef_quad));
     memcpy(C_ref, C0, (size_t)m * n * sizeof(Sleef_quad));
     ref_gemm_row(doTa, doTb, m, n, k, alpha,
                  A_row, Acols, B_row, Bcols, beta, C_ref, n);
 
-    /* Build inputs in requested layout. */
     Sleef_quad *A_use, *B_use, *C_use;
     int lda, ldb, ldc;
     Sleef_quad *A_col=NULL, *B_col=NULL, *C_col=NULL;
@@ -79,7 +74,6 @@ static void test_gemm_case(int m, int n, int k,
     cblas_qgemm(layout, ta, tb, m, n, k, alpha,
                 A_use, lda, B_use, ldb, beta, C_use, ldc);
 
-    /* Bring C_use back to row-major for comparison. */
     Sleef_quad *C_got = malloc((size_t)m * n * sizeof(Sleef_quad));
     if (layout == QblasRowMajor) {
         memcpy(C_got, C_use, (size_t)m * n * sizeof(Sleef_quad));
@@ -104,7 +98,7 @@ static void test_gemm_case(int m, int n, int k,
 }
 
 int main(void) {
-    /* Small (edge-tile) and larger (multi-block) sizes. */
+
     int sizes[][3] = {
         {1, 1, 1},     {1, 3, 1},   {3, 1, 1},
         {4, 4, 4},     {5, 5, 5},   {7, 11, 13},

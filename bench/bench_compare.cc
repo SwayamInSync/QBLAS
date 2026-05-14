@@ -1,6 +1,5 @@
-/* Apples-to-apples comparison benchmark — sizes match the legacy
- * benchmarks/benchmark.cpp (preserved on `main`) so the two outputs can be
- * lined up by routine and size. */
+/* Size grid matches the legacy benchmarks/benchmark.cpp on `main` so
+ * before/after numbers line up routine-by-routine. */
 
 #include <benchmark/benchmark.h>
 #include <qblas/qblas.h>
@@ -15,9 +14,8 @@ void fill_random(std::vector<T> &v, unsigned seed) {
     std::uniform_real_distribution<double> d(-1.0, 1.0);
     for (auto &q : v) q = qd(d(g));
 }
-} /* anon */
+}
 
-/* ---- DotProduct sizes: 1000, 10000, 100000, 1000000 ---- */
 static void BM_DotProduct(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
     std::vector<Sleef_quad> x(n), y(n);
@@ -31,7 +29,6 @@ static void BM_DotProduct(benchmark::State &state) {
 }
 BENCHMARK(BM_DotProduct)->Arg(1000)->Arg(10000)->Arg(100000)->Arg(1000000);
 
-/* ---- AXPY sizes: 1000, 4000, 16000, 64000 ---- */
 static void BM_AXPY(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
     std::vector<Sleef_quad> x(n), y(n);
@@ -45,7 +42,6 @@ static void BM_AXPY(benchmark::State &state) {
 }
 BENCHMARK(BM_AXPY)->Arg(1000)->Arg(4000)->Arg(16000)->Arg(64000);
 
-/* ---- VectorNorm (nrm2) sizes: 1000, 4000, 16000, 64000 ---- */
 static void BM_VectorNorm(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
     std::vector<Sleef_quad> x(n);
@@ -59,7 +55,6 @@ static void BM_VectorNorm(benchmark::State &state) {
 }
 BENCHMARK(BM_VectorNorm)->Arg(1000)->Arg(4000)->Arg(16000)->Arg(64000);
 
-/* New-only L1: asum, scal */
 static void BM_ASUM(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
     std::vector<Sleef_quad> x(n);
@@ -86,7 +81,6 @@ static void BM_SCAL(benchmark::State &state) {
 }
 BENCHMARK(BM_SCAL)->Arg(1000)->Arg(4000)->Arg(16000)->Arg(64000);
 
-/* ---- GEMV sizes: 100, 200, 400, 800, 1600 (square) ---- */
 static void BM_GEMV(benchmark::State &state) {
     size_t m = static_cast<size_t>(state.range(0)), n = m;
     std::vector<Sleef_quad> A(m*n), x(n), y(m);
@@ -101,7 +95,6 @@ static void BM_GEMV(benchmark::State &state) {
 }
 BENCHMARK(BM_GEMV)->Arg(100)->Arg(200)->Arg(400)->Arg(800)->Arg(1600);
 
-/* ---- GEMM sizes: 64, 128, 256, 512 (cubic) ---- */
 static void BM_GEMM(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
     std::vector<Sleef_quad> A(n*n), B(n*n), C(n*n);
@@ -117,7 +110,6 @@ static void BM_GEMM(benchmark::State &state) {
 }
 BENCHMARK(BM_GEMM)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
 
-/* ---- SYRK sizes: 64, 128, 256, 512 ---- */
 static void BM_SYRK(benchmark::State &state) {
     size_t n = static_cast<size_t>(state.range(0));
     size_t k = n;
@@ -133,7 +125,6 @@ static void BM_SYRK(benchmark::State &state) {
 }
 BENCHMARK(BM_SYRK)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
 
-/* ---- TRMM sizes: B is m x n square ---- */
 static void BM_TRMM(benchmark::State &state) {
     size_t m = static_cast<size_t>(state.range(0)), n = m;
     std::vector<Sleef_quad> A(m*m), B(m*n);
@@ -148,7 +139,6 @@ static void BM_TRMM(benchmark::State &state) {
 }
 BENCHMARK(BM_TRMM)->Arg(64)->Arg(128)->Arg(256)->Arg(512);
 
-/* ---- TRSM sizes ---- */
 static void BM_TRSM(benchmark::State &state) {
     size_t m = static_cast<size_t>(state.range(0)), n = m;
     std::vector<Sleef_quad> A(m*m), B(m*n), B0(m*n);

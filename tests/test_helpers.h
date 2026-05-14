@@ -1,14 +1,4 @@
-/* Shared helpers for the qblas test suite.
- *
- * These keep the test files declarative.  Convention: we encode random
- * test data in doubles, convert to Sleef_quad, and verify against a naive
- * reference implementation that uses scalar SLEEF quad ops.
- *
- * Pass/fail is decided in relative error in ULPs of double precision after
- * the final cast back.  Since we compare reference and tested against the
- * same input, we expect identical results to the last bit — any difference
- * indicates a bug, not rounding.
- */
+/* Shared helpers for the qblas test suite. */
 #ifndef QBLAS_TEST_HELPERS_H
 #define QBLAS_TEST_HELPERS_H
 
@@ -50,8 +40,8 @@ static inline void fill_mat(Sleef_quad *A, int rows, int cols, int ld) {
             A[(size_t)i * ld + j] = qd(frand(-1.0, 1.0));
 }
 
-/* Compare two quad arrays at given strides.  Returns max |diff|/(|a|+|b|) +
- * absolute diff for safety against zero. */
+/* Max relative error across two quad arrays, falling back to absolute
+ * diff when both values are essentially zero. */
 static inline double max_rel_err(const Sleef_quad *a, const Sleef_quad *b,
                                  int n, int astride, int bstride) {
     double worst = 0.0;

@@ -1,13 +1,4 @@
-# Detect target architecture and the set of ISA tiers we will build kernels for.
-#
-# Sets the cache variables:
-#   QBLAS_ARCH       — x86_64 | aarch64 | generic
-#   QBLAS_ISA_TIERS  — semicolon list of tier ids the build system should compile
-#                      e.g. "generic;sse2;avx2;avx512" on x86_64
-#                           "generic;neon" on aarch64
-#
-# Also exposes per-tier compile flag variables QBLAS_<TIER>_FLAGS for use when
-# building the per-ISA kernel translation units.
+# Populates QBLAS_ARCH, QBLAS_ISA_TIERS, and per-tier QBLAS_<TIER>_FLAGS.
 
 include_guard()
 
@@ -30,9 +21,8 @@ function(qblas_detect_arch)
         set(arch "aarch64")
         set(tiers "generic" "neon")
 
-        set(QBLAS_GENERIC_FLAGS ""                             CACHE INTERNAL "")
-        set(QBLAS_NEON_FLAGS    "" CACHE INTERNAL "")  # NEON is baseline on aarch64
-
+        set(QBLAS_GENERIC_FLAGS "" CACHE INTERNAL "")
+        set(QBLAS_NEON_FLAGS    "" CACHE INTERNAL "")
     else()
         message(STATUS "QBLAS: unknown CMAKE_SYSTEM_PROCESSOR='${CMAKE_SYSTEM_PROCESSOR}', falling back to generic only")
     endif()

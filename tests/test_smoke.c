@@ -1,5 +1,3 @@
-/* Minimal smoke test — just enough to confirm the build links and the
- * dispatch table is populated. */
 #include <qblas/qblas.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +22,6 @@ int main(void) {
     if (dq(dot) != 72.0) { fprintf(stderr, "FAIL: dot\n"); return 1; }
 
     cblas_qaxpy(N, qd(0.5), x, 1, y, 1);
-    /* y now = 2 + 0.5 * (1..8) = [2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6] */
     if (dq(y[0]) != 2.5 || dq(y[7]) != 6.0) {
         fprintf(stderr, "FAIL: axpy y[0]=%f y[7]=%f\n", dq(y[0]), dq(y[7]));
         return 1;

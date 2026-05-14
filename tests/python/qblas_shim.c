@@ -1,14 +1,7 @@
-/* Pointer-based shim around the by-value-Sleef_quad qblas entry points.
- *
- * Python's ctypes doesn't reliably honour SysV AMD64's rule that a
- * 16-byte struct made of two 8-byte integer fields is passed in two
- * integer registers.  In practice we see bus errors when ctypes pushes
- * Sleef_quad scalars on the stack mis-aligned.
- *
- * Each shim just dereferences the Quad-scalar pointers and forwards.
- * Public signature stays C ABI standard and only takes pointers / ints /
- * void pointers, which ctypes handles correctly across libffi versions.
- */
+/* Wraps the qblas entry points so every Sleef_quad scalar is passed by
+ * pointer instead of by value.  ctypes / libffi mishandles the SysV
+ * AMD64 rule for 16-byte struct-by-value arguments and bus-errors on
+ * the first call; this shim sidesteps that. */
 #include <qblas/qblas.h>
 
 #define EXP __attribute__((visibility("default")))
@@ -81,7 +74,7 @@ EXP void shim_qtrsm(int layout, int side, int uplo, int trans, int diag,
                 (Sleef_quad *)B, ldb);
 }
 
-/* qdot returns Sleef_quad by value; write to an out pointer instead. */
+/* Return Sleef_quad through an out pointer. */
 EXP void shim_qdot(int n, const void *x, int incx,
                    const void *y, int incy, Sleef_quad *out) {
     *out = cblas_qdot(n, (const Sleef_quad *)x, incx,
@@ -97,8 +90,7 @@ EXP size_t shim_iqamax(int n, const void *x, int incx) {
     return cblas_iqamax(n, (const Sleef_quad *)x, incx);
 }
 
-/* Constructors / casts to populate Sleef_quad without going through ctypes
- * by-value returns either. */
+/* Scalar Sleef_quad constructors / casts via out pointers. */
 EXP void shim_d2q(double v, Sleef_quad *out) {
     *out = Sleef_cast_from_doubleq1(v);
 }

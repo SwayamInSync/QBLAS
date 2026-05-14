@@ -1,4 +1,3 @@
-/* Generic (scalar) kernel tier — always built. */
 #define QV_WIDTH 1
 #define QV_SUFFIX generic
 #include "../kernels_template.h"

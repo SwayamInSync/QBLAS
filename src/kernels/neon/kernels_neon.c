@@ -1,4 +1,3 @@
-/* NEON kernel tier — width-2 SLEEF quad vectors on AArch64. */
 #define QBLAS_HAS_NEON 1
 #define QV_WIDTH 2
 #define QV_SUFFIX neon

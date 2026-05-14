@@ -2,20 +2,14 @@ cmake_minimum_required(VERSION 3.16)
 project(qblas
     VERSION 0.1.0
     LANGUAGES C CXX
-    DESCRIPTION "QBLAS: high-performance BLAS for IEEE-754 binary128 (quad precision) on top of SLEEF")
+    DESCRIPTION "BLAS for IEEE-754 binary128 on top of SLEEF")
 
-# ---------------------------------------------------------------------------
-# Options
-# ---------------------------------------------------------------------------
 option(QBLAS_BUILD_TESTS    "Build correctness tests"      ON)
 option(QBLAS_BUILD_BENCH    "Build Google Benchmark suite" ON)
 option(QBLAS_BUILD_SHARED   "Build shared library"         ON)
 option(QBLAS_USE_OPENMP     "Enable OpenMP threading"      ON)
 option(QBLAS_NATIVE         "Tune top-level code for the host CPU" OFF)
 
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
@@ -30,9 +24,6 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# ---------------------------------------------------------------------------
-# Architecture detection
-# ---------------------------------------------------------------------------
 include(CheckCSourceCompiles)
 include(CheckCCompilerFlag)
 include(QBLASArch)
@@ -40,11 +31,7 @@ qblas_detect_arch()
 message(STATUS "QBLAS target arch: ${QBLAS_ARCH}")
 message(STATUS "QBLAS ISA tiers: ${QBLAS_ISA_TIERS}")
 
-# ---------------------------------------------------------------------------
-# Dependencies: SLEEF
-# ---------------------------------------------------------------------------
-# Allow user override via SLEEF_ROOT. Otherwise we look for a local build under
-# .sleef-prefix (populated by scripts/bootstrap.sh) before falling back to system.
+# SLEEF: SLEEF_ROOT env var > .sleef-prefix > system pkg-config.
 if(DEFINED ENV{SLEEF_ROOT} AND NOT SLEEF_ROOT)
     set(SLEEF_ROOT "$ENV{SLEEF_ROOT}")
 endif()
@@ -72,23 +59,16 @@ target_link_libraries(qblas::sleef INTERFACE "${SLEEFQUAD_LIBRARY}" "${SLEEF_LIB
 if(TLFLOAT_LIBRARY)
     target_link_libraries(qblas::sleef INTERFACE "${TLFLOAT_LIBRARY}")
 endif()
-# Embed RPATH so tests/benches find the SLEEF .sleef-prefix libs (and
-# transitively libtlfloat) without LD_LIBRARY_PATH gymnastics. Use the
-# old DT_RPATH tag (--disable-new-dtags) because DT_RUNPATH is not
-# inherited from dependent libraries on glibc, which would cause
-# libsleefquad's NEEDED libtlfloat to fail to resolve in the executable.
+
+# Use DT_RPATH (not DT_RUNPATH) on glibc so libsleefquad's NEEDED libtlfloat
+# resolves through the executable's rpath.
 set(CMAKE_INSTALL_RPATH "${SLEEF_ROOT}/lib")
 set(CMAKE_BUILD_RPATH   "${SLEEF_ROOT}/lib")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
-# --disable-new-dtags is a GNU-ld feature; macOS (ld64) has @rpath semantics
-# that already propagate, so we only emit it on ELF platforms.
 if((CMAKE_C_COMPILER_ID MATCHES "GNU|Clang") AND NOT APPLE)
     add_link_options(-Wl,--disable-new-dtags)
 endif()
 
-# ---------------------------------------------------------------------------
-# Dependencies: OpenMP
-# ---------------------------------------------------------------------------
 if(QBLAS_USE_OPENMP)
     find_package(OpenMP)
     if(OpenMP_C_FOUND)
@@ -99,29 +79,17 @@ if(QBLAS_USE_OPENMP)
     endif()
 endif()
 
-# ---------------------------------------------------------------------------
-# Library
-# ---------------------------------------------------------------------------
 add_subdirectory(src)
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 if(QBLAS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-# ---------------------------------------------------------------------------
-# Benchmarks
-# ---------------------------------------------------------------------------
 if(QBLAS_BUILD_BENCH)
     add_subdirectory(bench)
 endif()
 
-# ---------------------------------------------------------------------------
-# Summary
-# ---------------------------------------------------------------------------
 message(STATUS "")
 message(STATUS "=== QBLAS configuration ===")
 message(STATUS "  Build type      : ${CMAKE_BUILD_TYPE}")

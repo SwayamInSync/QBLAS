@@ -1,4 +1,3 @@
-/* AVX-512F kernel tier — width-8 SLEEF quad vectors (Sleef_quadx8). */
 #define QBLAS_HAS_AVX512 1
 #define QV_WIDTH 8
 #define QV_SUFFIX avx512

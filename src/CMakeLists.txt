@@ -1,10 +1,3 @@
-# QBLAS library — built as a single shared (or static) library with multiple
-# internal "kernel tiers" compiled with their own SIMD flags.  Runtime
-# dispatch selects the best tier at library init.
-
-# ---------------------------------------------------------------------------
-# Core sources (always built)
-# ---------------------------------------------------------------------------
 set(QBLAS_CORE_SOURCES
     cpu/qblas_cpu.c
     level1/qblas_level1.c
@@ -36,8 +29,6 @@ set_target_properties(qblas PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR})
 
-
-# Baseline flags
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(qblas PRIVATE
         -Wall -Wextra -Wno-unused-parameter
@@ -49,14 +40,8 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
-# ---------------------------------------------------------------------------
-# Per-tier kernel libraries
-#
-# Each tier is built as an OBJECT library with its own -march flags, then
-# linked into the main qblas library.  The registration symbol from each
-# tier is referenced by qblas_cpu.c; with --whole-archive (or visibility
-# tricks) we ensure none of them are stripped.
-# ---------------------------------------------------------------------------
+# Per-ISA OBJECT libraries built with their own -march flags and linked
+# into qblas.  qblas_cpu.c selects which one's register_* gets called.
 function(qblas_add_tier name width flags has_define)
     set(target qblas_kernels_${name})
     add_library(${target} OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${name}/kernels_${name}.c)
@@ -73,14 +58,10 @@ function(qblas_add_tier name width flags has_define)
     set_target_properties(${target} PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         C_STANDARD 11)
-    # Hidden visibility so only the registration function is exported
-    # through qblas itself (we use it locally).
 endfunction()
 
-# Always-on generic tier.
 qblas_add_tier(generic 1 "" QBLAS_HAS_GENERIC)
 
-# x86_64 tiers.
 if(QBLAS_ARCH STREQUAL "x86_64")
     qblas_add_tier(sse2   2 "${QBLAS_SSE2_FLAGS}"   QBLAS_HAS_SSE2)
     qblas_add_tier(avx2   4 "${QBLAS_AVX2_FLAGS}"   QBLAS_HAS_AVX2)
@@ -107,10 +88,8 @@ else()
     target_compile_definitions(qblas PRIVATE QBLAS_HAS_GENERIC=1)
 endif()
 
-# Export the library name as `qblas::qblas` for downstream consumers.
 add_library(qblas::qblas ALIAS qblas)
 
-# Install rules (basic — enough for `cmake --install`).
 include(GNUInstallDirs)
 install(TARGETS qblas
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

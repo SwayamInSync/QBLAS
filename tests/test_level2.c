@@ -1,11 +1,6 @@
-/* Level 2 BLAS correctness suite — gemv, ger, symv, trsv.
- *
- * Strategy: build a row-major naive reference for each, then translate the
- * test matrices/vectors to both layouts and all transpose options, calling
- * cblas_qgemv etc. and checking the output against the reference. */
 #include "test_helpers.h"
 
-/* Reference gemv: y = alpha * op(A) * x + beta * y, row-major. */
+/* Row-major naive reference. */
 static void ref_gemv_row(int doT, int m, int n,
                          Sleef_quad alpha,
                          const Sleef_quad *A, int lda,
@@ -28,7 +23,6 @@ static void ref_gemv_row(int doT, int m, int n,
     }
 }
 
-/* Take a row-major M x N matrix and produce its column-major copy in `B`. */
 static void to_colmajor(const Sleef_quad *Arow, int M, int N, int lda_row,
                         Sleef_quad *Bcol, int ldb_col) {
     for (int i = 0; i < M; ++i)
@@ -38,7 +32,7 @@ static void to_colmajor(const Sleef_quad *Arow, int M, int N, int lda_row,
 
 static void test_gemv_case(int m, int n, QBLAS_LAYOUT layout, QBLAS_TRANSPOSE trans,
                            int incx, int incy) {
-    /* Build matrix in row-major, reference uses row-major directly. */
+    
     Sleef_quad *Arow = (Sleef_quad *)malloc((size_t)m * n * sizeof(Sleef_quad));
     fill_mat(Arow, m, n, n);
 
@@ -101,7 +95,6 @@ static void test_gemv_all(void) {
     }
 }
 
-/* ----- ger ----- */
 static void ref_ger_row(int m, int n,
                         Sleef_quad alpha,
                         const Sleef_quad *x, int incx,
@@ -141,12 +134,10 @@ static void test_ger_case(int m, int n, QBLAS_LAYOUT layout, int incx, int incy)
     }
     cblas_qger(layout, m, n, alpha, x, incx, y, incy, A_use, lda_use);
 
-    /* Bring back to row-major for comparison. */
     Sleef_quad *Arow_after = (Sleef_quad *)malloc((size_t)m * n * sizeof(Sleef_quad));
     if (layout == QblasRowMajor) {
         memcpy(Arow_after, A_use, (size_t)m * n * sizeof(Sleef_quad));
     } else {
-        /* Acol back to row major. */
         for (int i = 0; i < m; ++i)
             for (int j = 0; j < n; ++j)
                 Arow_after[(size_t)i * n + j] = A_use[(size_t)j * lda_use + i];
@@ -175,20 +166,17 @@ static void test_ger_all(void) {
     }
 }
 
-/* ----- trsv: solve op(A) x = b, A triangular ----- */
 static void test_trsv_case(int n, QBLAS_LAYOUT layout, QBLAS_UPLO uplo,
                            QBLAS_TRANSPOSE trans, QBLAS_DIAG diag) {
     Sleef_quad *Arow = (Sleef_quad *)malloc((size_t)n * n * sizeof(Sleef_quad));
     fill_mat(Arow, n, n, n);
-    /* Make A diagonally dominant so the triangular solve is well-conditioned
-     * and we don't see catastrophic cancellation. */
+    /* Diagonally dominant: keeps the solve well-conditioned. */
     for (int i = 0; i < n; ++i)
         Arow[(size_t)i * n + i] = qd(frand(2.0, 4.0));
 
     Sleef_quad *x_orig = (Sleef_quad *)malloc(n * sizeof(Sleef_quad));
     fill_vec(x_orig, n, 1);
 
-    /* Build b = A * x_orig (using the triangle we'll actually use). */
     int doT = (trans == QblasTrans || trans == QblasConjTrans);
     int upper = (uplo == QblasUpper);
     Sleef_quad *b = (Sleef_quad *)malloc(n * sizeof(Sleef_quad));
@@ -207,7 +195,6 @@ static void test_trsv_case(int n, QBLAS_LAYOUT layout, QBLAS_UPLO uplo,
         b[i] = s;
     }
 
-    /* Translate A to the requested layout. */
     Sleef_quad *A_use; int lda_use; Sleef_quad *Acol = NULL;
     if (layout == QblasRowMajor) { A_use = Arow; lda_use = n; }
     else { Acol = malloc((size_t)n*n*sizeof(Sleef_quad)); to_colmajor(Arow, n, n, n, Acol, n); A_use = Acol; lda_use = n; }

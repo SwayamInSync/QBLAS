@@ -1,12 +1,6 @@
-/* Level 1 BLAS correctness suite.
- *
- * Each routine is checked against a naive scalar reference at multiple
- * sizes and strides (including negative strides for routines that allow
- * them).  Cross-tier results are also checked by overriding the dispatch
- * with QBLAS_DISPATCH=generic and comparing against the auto-selected tier. */
 #include "test_helpers.h"
 
-/* Reference implementations (slow, obviously correct). */
+/* Naive scalar references. */
 static Sleef_quad ref_dot(int n, const Sleef_quad *x, int ix,
                           const Sleef_quad *y, int iy) {
     int ox = (ix < 0) ? (n - 1) * (-ix) : 0;
@@ -129,10 +123,8 @@ static void test_copy_swap(int n) {
     CHECK_ARR(yc, x, n, 1e-30, "copy");
 
     cblas_qswap(n, x, 1, y, 1);
-    /* After swap: x holds original y; y holds xs. */
     Sleef_quad *yorig = (Sleef_quad *)malloc(n * sizeof(Sleef_quad));
-    memcpy(yorig, yc, n * sizeof(Sleef_quad)); /* yc still has xs */
-    /* Recompute y_original by reading from xs (original x) */
+    memcpy(yorig, yc, n * sizeof(Sleef_quad));
     CHECK_ARR(y, xs, n, 1e-30, "swap-y");
 
     free(yorig); free(yc); free(xs); free(x); free(y);
