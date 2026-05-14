@@ -396,17 +396,29 @@ void qblas_aligned_free(void *p) { free(p); }
 static int g_user_thread_cap = 0; /* 0 = follow omp default */
 #endif
 
+/* qblas owns no OpenMP state.  It reads `omp_get_max_threads()` (which
+ * reflects OMP_NUM_THREADS / the host's omp_set_num_threads call) and
+ * uses that as a ceiling, optionally further capped by `g_user_thread_cap`.
+ *
+ * Calling qblas_set_num_threads(N) does NOT call omp_set_num_threads;
+ * it only narrows qblas's own work-distribution.  This is the right
+ * behaviour for libraries: a BLAS shouldn't silently mutate the host
+ * application's process-wide OMP setting.  If you want fewer global
+ * threads, set OMP_NUM_THREADS or call omp_set_num_threads yourself. */
 void qblas_set_num_threads(int n) {
 #ifdef _OPENMP
     g_user_thread_cap = n > 0 ? n : 0;
-    if (n > 0) omp_set_num_threads(n);
 #else
     (void)n;
 #endif
 }
 int qblas_get_num_threads(void) {
 #ifdef _OPENMP
-    return omp_get_max_threads();
+    /* Effective ceiling = host OMP setting, capped by qblas user cap. */
+    int omp_max = omp_get_max_threads();
+    if (g_user_thread_cap > 0 && g_user_thread_cap < omp_max)
+        return g_user_thread_cap;
+    return omp_max;
 #else
     return 1;
 #endif

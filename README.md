@@ -34,10 +34,12 @@ Library control:
 ```c
 const char *qblas_get_version(void);
 const char *qblas_get_dispatch_tier(void); /* "generic" | "sse2" | "avx2" | "avx512" | "neon" */
-void  qblas_set_num_threads(int n);
-int   qblas_get_num_threads(void);
-int   qblas_get_max_threads(void);
+void  qblas_set_num_threads(int n);   /* qblas-internal cap; does NOT call omp_set_num_threads */
+int   qblas_get_num_threads(void);    /* effective: min(omp_get_max_threads(), qblas cap) */
+int   qblas_get_max_threads(void);    /* raw omp_get_max_threads() */
 ```
+
+**Threading contract.** qblas never modifies OpenMP's global thread count. `OMP_NUM_THREADS` and `omp_set_num_threads()` are the only knobs that change OpenMP's view; `qblas_set_num_threads(N)` only narrows qblas's own work distribution within whatever the host OpenMP setting is. This is intentional so that linking qblas into a larger application cannot silently change the application's other OpenMP regions. Per-region thread counts inside qblas come from the dynamic threading heuristic (work-cycles vs measured fork-cost) capped at the value of `qblas_get_num_threads()`.
 
 Environment overrides:
 
