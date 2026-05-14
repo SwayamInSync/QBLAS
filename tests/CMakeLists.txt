@@ -40,12 +40,20 @@ if(Python3_Interpreter_FOUND)
         RESULT_VARIABLE _qblas_have_numpy
         OUTPUT_QUIET ERROR_QUIET)
     if(_qblas_have_numpy EQUAL 0)
+        # Put SLEEF and the build's shared libs on the dynamic loader's
+        # search path so ctypes.CDLL can resolve them by basename alone.
+        if(APPLE)
+            set(_qblas_ld_var "DYLD_LIBRARY_PATH")
+        else()
+            set(_qblas_ld_var "LD_LIBRARY_PATH")
+        endif()
+        set(_qblas_ld_path "${SLEEF_ROOT}/lib:$<TARGET_FILE_DIR:qblas>:$<TARGET_FILE_DIR:qblas_shim>")
         add_test(NAME test_against_numpy
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/python/test_against_numpy.py)
         set_tests_properties(test_against_numpy PROPERTIES
             DEPENDS qblas_shim
-            ENVIRONMENT "QBLAS_TEST_SHIM=$<TARGET_FILE:qblas_shim>")
+            ENVIRONMENT "${_qblas_ld_var}=${_qblas_ld_path}")
     else()
         message(STATUS "QBLAS: numpy not importable from ${Python3_EXECUTABLE}; skipping test_against_numpy")
     endif()

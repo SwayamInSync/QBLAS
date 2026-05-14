@@ -5,51 +5,17 @@ ctypes / libffi does not reliably handle 16-byte struct-by-value args."""
 from __future__ import annotations
 
 import ctypes
-import os
-from pathlib import Path
+import sys
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parent.parent.parent
-SLEEF_LIBDIR = REPO / ".sleef-prefix" / "lib"
+# ctest adds .sleef-prefix/lib and the build's library dirs to
+# {LD,DYLD}_LIBRARY_PATH; ctypes.CDLL hands these basenames to the
+# dynamic loader, which resolves them along with SLEEF transitively.
+_EXT = ".dylib" if sys.platform == "darwin" else ".so"
 
-def _find(dirpath: Path, stem: str) -> Path | None:
-    """Pick a shared library matching `stem` in `dirpath`.
-
-    Looks for files named `{stem}.<any>` whose suffix chain contains
-    `.so` or `.dylib`, and prefers the canonical (shortest) name so
-    `libsleef.so` wins over `libsleef.so.4.0.0`."""
-    matches = []
-    for p in Path(dirpath).iterdir():
-        if not p.name.startswith(stem + "."):
-            continue
-        if any(s in (".so", ".dylib") for s in p.suffixes):
-            matches.append(p)
-    if not matches:
-        return None
-    matches.sort(key=lambda p: (len(p.name), p.name))
-    return matches[0]
-
-def _load(env_var: str, dirpath: Path, stem: str):
-    override = os.environ.get(env_var)
-    if override:
-        p = Path(override)
-        if not p.exists():
-            raise FileNotFoundError(f"{stem} not found at {p} (from ${env_var})")
-    else:
-        p = _find(dirpath, stem)
-        if p is None:
-            raise FileNotFoundError(
-                f"{stem} not found under {dirpath} "
-                f"(set ${env_var} to override)")
-    return ctypes.CDLL(str(p), mode=ctypes.RTLD_GLOBAL)
-
-# Load NEEDED chain in dependency order.
-_tlfloat   = _load("QBLAS_TEST_TLFLOAT",   SLEEF_LIBDIR,           "libtlfloat")
-_sleef     = _load("QBLAS_TEST_SLEEF",     SLEEF_LIBDIR,           "libsleef")
-_sleefquad = _load("QBLAS_TEST_SLEEFQUAD", SLEEF_LIBDIR,           "libsleefquad")
-_qblas     = _load("QBLAS_TEST_QBLAS",     REPO / "build" / "src", "libqblas")
-_shim      = _load("QBLAS_TEST_SHIM",      REPO / "build",         "libqblas_shim")
+_qblas = ctypes.CDLL(f"libqblas{_EXT}",      mode=ctypes.RTLD_GLOBAL)
+_shim  = ctypes.CDLL(f"libqblas_shim{_EXT}", mode=ctypes.RTLD_GLOBAL)
 
 class Quad(ctypes.Structure):
     _fields_ = [("x", ctypes.c_uint64), ("y", ctypes.c_uint64)]
