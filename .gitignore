@@ -10,3 +10,4 @@ compile_commands.json
 *.dylib
 .DS_Store
 Testing/
+upstream-project/

@@ -9,6 +9,11 @@
 #include "common/qblas_internal.h"
 #include "common/qblas_dispatch.h"
 
+/* Request POSIX clock_gettime / sysconf even on conservative libcs. */
+#ifndef _POSIX_C_SOURCE
+#  define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
