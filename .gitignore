@@ -8,6 +8,8 @@ compile_commands.json
 *.so
 *.so.*
 *.dylib
+*.pyc
+__pycache__/
 .DS_Store
 .vscode/
 Testing/
