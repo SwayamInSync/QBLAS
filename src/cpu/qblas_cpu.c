@@ -130,10 +130,12 @@ static void detect_caches(qblas_tune_t *t) {
     t->cores = (ncpu > 0) ? (int)ncpu : 1;
 }
 
+#ifdef _OPENMP
 static inline uint64_t ts_ns(void) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
+#endif
 
 /* Measures the cost of an empty parallel region so qblas_resolve_threads
  * can decide if a piece of work justifies forking. */

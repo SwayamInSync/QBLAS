@@ -15,7 +15,7 @@ Sleef_quad cblas_qdot(int n,
     if (n <= 0) return QBLAS_ZERO;
     if (incx == 1 && incy == 1) {
         int nthreads = qblas_resolve_threads((size_t)n, 1);
-        if (nthreads > 1 && n >= qblas_tune()->l1_thread_threshold) {
+        if (nthreads > 1 && (size_t)n >= qblas_tune()->l1_thread_threshold) {
 #ifdef _OPENMP
             Sleef_quad totals[256] = {0};
             if (nthreads > 256) nthreads = 256;
@@ -52,7 +52,7 @@ Sleef_quad cblas_qasum(int n, const Sleef_quad *x, int incx) {
     if (n <= 0) return QBLAS_ZERO;
     if (incx == 1) {
         int nthreads = qblas_resolve_threads((size_t)n, 1);
-        if (nthreads > 1 && n >= qblas_tune()->l1_thread_threshold) {
+        if (nthreads > 1 && (size_t)n >= qblas_tune()->l1_thread_threshold) {
 #ifdef _OPENMP
             Sleef_quad totals[256] = {0};
             if (nthreads > 256) nthreads = 256;
@@ -89,7 +89,7 @@ void cblas_qaxpy(int n, Sleef_quad alpha,
     if (n <= 0 || qiszero(alpha)) return;
     if (incx == 1 && incy == 1) {
         int nthreads = qblas_resolve_threads((size_t)n, 2);
-        if (nthreads > 1 && n >= qblas_tune()->l1_thread_threshold) {
+        if (nthreads > 1 && (size_t)n >= qblas_tune()->l1_thread_threshold) {
 #ifdef _OPENMP
             #pragma omp parallel num_threads(nthreads)
             {
@@ -116,7 +116,7 @@ void cblas_qscal(int n, Sleef_quad alpha, Sleef_quad *x, int incx) {
     if (n <= 0) return;
     if (incx == 1) {
         int nthreads = qblas_resolve_threads((size_t)n, 1);
-        if (nthreads > 1 && n >= qblas_tune()->l1_thread_threshold) {
+        if (nthreads > 1 && (size_t)n >= qblas_tune()->l1_thread_threshold) {
 #ifdef _OPENMP
             #pragma omp parallel num_threads(nthreads)
             {

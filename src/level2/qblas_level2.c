@@ -90,8 +90,8 @@ void cblas_qger(QBLAS_LAYOUT layout,
     ptrdiff_t ox = (incx < 0) ? (ptrdiff_t)(m - 1) * (-incx) : 0;
     ptrdiff_t oy = (incy < 0) ? (ptrdiff_t)(n - 1) * (-incy) : 0;
     if (layout == QblasRowMajor) {
-        int nthreads = qblas_resolve_threads((size_t)m, (size_t)n);
         #ifdef _OPENMP
+        int nthreads = qblas_resolve_threads((size_t)m, (size_t)n);
         #pragma omp parallel for num_threads(nthreads) schedule(static)
         #endif
         for (int i = 0; i < m; ++i) {
@@ -100,8 +100,8 @@ void cblas_qger(QBLAS_LAYOUT layout,
             qblas_dispatch_qaxpy((size_t)n, ax, y + oy, incy, A + (size_t)i * lda, 1);
         }
     } else {
-        int nthreads = qblas_resolve_threads((size_t)n, (size_t)m);
         #ifdef _OPENMP
+        int nthreads = qblas_resolve_threads((size_t)n, (size_t)m);
         #pragma omp parallel for num_threads(nthreads) schedule(static)
         #endif
         for (int j = 0; j < n; ++j) {

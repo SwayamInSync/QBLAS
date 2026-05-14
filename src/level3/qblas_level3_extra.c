@@ -88,8 +88,8 @@ static void trsm_left_diag(QBLAS_LAYOUT layout, QBLAS_UPLO uplo,
     int i_start = eff_upper ? bs - 1 : 0;
     int i_end   = eff_upper ? -1     : bs;
 
-    int nthreads = qblas_resolve_threads((size_t)bs * (size_t)n, (size_t)bs);
 #ifdef _OPENMP
+    int nthreads = qblas_resolve_threads((size_t)bs * (size_t)n, (size_t)bs);
     #pragma omp parallel for num_threads(nthreads) schedule(static)
 #endif
     for (int j = 0; j < n; ++j) {
@@ -126,8 +126,8 @@ static void trmm_left_diag(QBLAS_LAYOUT layout, QBLAS_UPLO uplo,
     int eff_upper = doT ? !upper : upper;
     int unit  = (diag == QblasUnit);
 
-    int nthreads = qblas_resolve_threads((size_t)bs * (size_t)n, (size_t)bs);
 #ifdef _OPENMP
+    int nthreads = qblas_resolve_threads((size_t)bs * (size_t)n, (size_t)bs);
     #pragma omp parallel for num_threads(nthreads) schedule(static)
 #endif
     for (int j = 0; j < n; ++j) {

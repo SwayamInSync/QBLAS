@@ -30,13 +30,23 @@ target_include_directories(qblas_shim PRIVATE ${CMAKE_SOURCE_DIR}/include)
 set_target_properties(qblas_shim PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-# Look for a Python 3 interpreter — required only for the numpy test.
+# Look for a Python 3 interpreter with numpy. Skipped if neither is found
+# (e.g. environments without numpy installed). On macOS CI the workflow
+# exports VIRTUAL_ENV so find_package(Python3) selects the venv.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
-    add_test(NAME test_against_numpy
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/python/test_against_numpy.py)
-    set_tests_properties(test_against_numpy PROPERTIES
-        DEPENDS qblas_shim
-        ENVIRONMENT "QBLAS_TEST_SHIM=$<TARGET_FILE:qblas_shim>")
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import numpy"
+        RESULT_VARIABLE _qblas_have_numpy
+        OUTPUT_QUIET ERROR_QUIET)
+    if(_qblas_have_numpy EQUAL 0)
+        add_test(NAME test_against_numpy
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/python/test_against_numpy.py)
+        set_tests_properties(test_against_numpy PROPERTIES
+            DEPENDS qblas_shim
+            ENVIRONMENT "QBLAS_TEST_SHIM=$<TARGET_FILE:qblas_shim>")
+    else()
+        message(STATUS "QBLAS: numpy not importable from ${Python3_EXECUTABLE}; skipping test_against_numpy")
+    endif()
 endif()
