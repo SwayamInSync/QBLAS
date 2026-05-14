@@ -6,48 +6,50 @@ from __future__ import annotations
 
 import ctypes
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent.parent
 SLEEF_LIBDIR = REPO / ".sleef-prefix" / "lib"
-IS_MACOS = sys.platform == "darwin"
 
-def _candidates(dirpath: Path, stem: str, soversion: str | None = None):
-    """Return platform-ordered candidate paths for a library."""
-    d = Path(dirpath)
-    if IS_MACOS:
-        names = []
-        if soversion:
-            names.append(f"{stem}.{soversion}.dylib")
-        names += [f"{stem}.dylib"]
-    else:
-        names = []
-        if soversion:
-            names.append(f"{stem}.so.{soversion}")
-        names += [f"{stem}.so"]
-    return [d / n for n in names]
+def _find(dirpath: Path, stem: str) -> Path | None:
+    """Pick a shared library matching `stem` in `dirpath`.
 
-def _load(env_var: str, dirpath: Path, stem: str, soversion: str | None = None):
+    Looks for files named `{stem}.<any>` whose suffix chain contains
+    `.so` or `.dylib`, and prefers the canonical (shortest) name so
+    `libsleef.so` wins over `libsleef.so.4.0.0`."""
+    matches = []
+    for p in Path(dirpath).iterdir():
+        if not p.name.startswith(stem + "."):
+            continue
+        if any(s in (".so", ".dylib") for s in p.suffixes):
+            matches.append(p)
+    if not matches:
+        return None
+    matches.sort(key=lambda p: (len(p.name), p.name))
+    return matches[0]
+
+def _load(env_var: str, dirpath: Path, stem: str):
     override = os.environ.get(env_var)
     if override:
-        candidates = [Path(override)]
+        p = Path(override)
+        if not p.exists():
+            raise FileNotFoundError(f"{stem} not found at {p} (from ${env_var})")
     else:
-        candidates = _candidates(dirpath, stem, soversion)
-    for p in candidates:
-        if p.exists():
-            return ctypes.CDLL(str(p), mode=ctypes.RTLD_GLOBAL)
-    tried = ", ".join(str(c) for c in candidates)
-    raise FileNotFoundError(f"{stem} not found (tried: {tried})")
+        p = _find(dirpath, stem)
+        if p is None:
+            raise FileNotFoundError(
+                f"{stem} not found under {dirpath} "
+                f"(set ${env_var} to override)")
+    return ctypes.CDLL(str(p), mode=ctypes.RTLD_GLOBAL)
 
 # Load NEEDED chain in dependency order.
-_tlfloat   = _load("QBLAS_TEST_TLFLOAT",   SLEEF_LIBDIR,             "libtlfloat",   "1")
-_sleef     = _load("QBLAS_TEST_SLEEF",     SLEEF_LIBDIR,             "libsleef")
-_sleefquad = _load("QBLAS_TEST_SLEEFQUAD", SLEEF_LIBDIR,             "libsleefquad")
-_qblas     = _load("QBLAS_TEST_QBLAS",     REPO / "build" / "src",   "libqblas")
-_shim      = _load("QBLAS_TEST_SHIM",      REPO / "build",           "libqblas_shim")
+_tlfloat   = _load("QBLAS_TEST_TLFLOAT",   SLEEF_LIBDIR,           "libtlfloat")
+_sleef     = _load("QBLAS_TEST_SLEEF",     SLEEF_LIBDIR,           "libsleef")
+_sleefquad = _load("QBLAS_TEST_SLEEFQUAD", SLEEF_LIBDIR,           "libsleefquad")
+_qblas     = _load("QBLAS_TEST_QBLAS",     REPO / "build" / "src", "libqblas")
+_shim      = _load("QBLAS_TEST_SHIM",      REPO / "build",         "libqblas_shim")
 
 class Quad(ctypes.Structure):
     _fields_ = [("x", ctypes.c_uint64), ("y", ctypes.c_uint64)]
