@@ -1,5 +1,5 @@
 # Mirrors the CMake build for use as a Meson subproject by downstream
-# packages (notably numpy-quaddtype).  Produces libqblas.a + qblas_dep.
+# packages (notably numpy-quaddtype).  Produces libqblas.a + qblas_dep
 
 project('qblas', 'c',
         version: '0.1.0',
@@ -8,10 +8,6 @@ project('qblas', 'c',
 
 cc = meson.get_compiler('c')
 
-# When invoked as a subproject we force-load the parent's sleef.wrap so
-# libsleef and libsleefquad come from the same build (a stray system
-# SLEEF can otherwise satisfy one half but not the other).  Standalone
-# builds use pkg-config / cc.find_library.
 if meson.is_subproject()
     sleef_subproj = subproject('sleef')
     sleef_dep     = sleef_subproj.get_variable('sleef_dep')
@@ -72,7 +68,7 @@ foreach tier : isa_tiers
     tier_libs += tier_lib
 endforeach
 
-# qblas_cpu.c needs to know which tier registration functions exist.
+
 core_defines = ['-DQBLAS_HAS_GENERIC=1']
 if is_x86
     core_defines += ['-DQBLAS_HAS_SSE2=1', '-DQBLAS_HAS_AVX2=1', '-DQBLAS_HAS_AVX512=1']

@@ -9,5 +9,6 @@ compile_commands.json
 *.so.*
 *.dylib
 .DS_Store
+.vscode/
 Testing/
 upstream-project/
