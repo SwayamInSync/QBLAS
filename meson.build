@@ -16,15 +16,26 @@ cc = meson.get_compiler('c')
 # ---------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------
-# SLEEF is the only mandatory dep.  Downstream (numpy-quaddtype) already
-# pulls SLEEF in via its own wrap; standalone builds find it via the
-# install prefix's pkg-config.  SLEEF doesn't ship a .pc file for the
-# quad library, so we have to find it manually as a plain library.
-sleef_dep = dependency('sleef', required: false)
+# SLEEF is the only mandatory dep.  Resolution order:
+#   1. Use the parent project's sleef.wrap fallback if we are a
+#      subproject — Meson's top-level subprojects/ pool is shared with
+#      child subprojects, so `fallback: ['sleef', 'sleef_dep']` finds
+#      numpy-quaddtype's wrap and re-uses the same sleef build.
+#   2. Standalone builds: try pkg-config, then fall back to a plain
+#      library lookup against -L paths the caller has set.
+# SLEEF does not ship a .pc file for libsleefquad even when present, so
+# sleefquad always needs the library-lookup branch unless a parent has
+# already loaded it via subproject().
+sleef_dep = dependency('sleef',
+    fallback: ['sleef', 'sleef_dep'],
+    required: false)
 if not sleef_dep.found()
     sleef_dep = cc.find_library('sleef', required: true)
 endif
-sleefquad_dep = dependency('sleefquad', required: false)
+
+sleefquad_dep = dependency('sleefquad',
+    fallback: ['sleef', 'sleefquad_dep'],
+    required: false)
 if not sleefquad_dep.found()
     sleefquad_dep = cc.find_library('sleefquad', required: true)
 endif
