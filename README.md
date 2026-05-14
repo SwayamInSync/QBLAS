@@ -187,7 +187,21 @@ QBLAS_DISPATCH=sse2    ctest --test-dir build
 QBLAS_DISPATCH=avx2    ctest --test-dir build
 ```
 
-All three should pass identically. This confirms the runtime CPU dispatch produces the same result across SIMD widths.
+All four should pass identically. This confirms the runtime CPU dispatch produces the same result across SIMD widths. If you set `QBLAS_DISPATCH` to a tier the CPU does not support (e.g. `avx512` on a Zen 3 box), the library prints a stderr warning and falls back to the auto-detected tier instead of executing illegal instructions.
+
+### numpy comparison test (`test_against_numpy`)
+
+In addition to the C tests against a naive scalar reference, there is a Python test that calls every QBLAS routine via ctypes, rounds the quad output to float64, and compares against numpy's float64 implementation of the same operation. This catches any issue that survives both the naive C reference and the quad-precision pathway but would surface when a user does `Sleef_cast_to_doubleq1(...)`.
+
+Requirements: Python 3 and `numpy >= 2.0`.
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install 'numpy>=2.0'
+PATH=$(pwd)/.venv/bin:$PATH ctest --test-dir build --output-on-failure -R test_against_numpy
+```
+
+The test exercises all Level 1 / 2 / 3 routines at a range of sizes with random `~U(-1, 1)` inputs. Tolerances are picked per routine to allow for the double-precision rounding step (~1e-13 for elementwise, ~1e-10 for matrix-vector, scales with k for matrix-matrix).
 
 ## Benchmarking
 
@@ -261,6 +275,7 @@ src/                    Library sources.
   level2/               L2 entry points.
   level3/               qgemm, qsyrk, qtrmm, qtrsm.
 tests/                  ctest binaries.
+  python/               ctypes wrapper + numpy-vs-qblas test.
 bench/                  Google Benchmark binaries.
 cmake/                  CMake helpers (architecture detection).
 scripts/                bootstrap_sleef.sh.
