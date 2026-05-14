@@ -1,14 +1,14 @@
 """End-to-end throughput comparison: numpy float64 (scipy-openblas) vs
 numpy-quaddtype (this QBLAS) for the BLAS-1/2/3 hot path.
 
-This is the harness that produced the numbers in perf_comparison_with_old.md
+This is the harness that produced the numbers in docs/perf_comparison_with_old.md
 and in the QBLAS 1.5.0 release notes. Reproducing those numbers from a
 clean checkout should give you the same shape (single-thread quad-FMA cost
 ~800x f64; multi-thread closes that gap to ~50-550x depending on size and
 thread count). Exact values depend on host CPU, memory bandwidth, and
 OpenBLAS tier.
 
-Methodology (matching what perf_comparison_with_old.md describes):
+Methodology (matching what docs/perf_comparison_with_old.md describes):
   - Pin both libraries to BENCH_THREADS via OMP_NUM_THREADS / OPENBLAS_NUM_THREADS
     before importing numpy. Same thread count on both sides; no asymmetric
     advantage.

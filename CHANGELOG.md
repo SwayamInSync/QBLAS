@@ -29,7 +29,7 @@ Measured on AMD EPYC 7V13 (Zen 3, AVX2 tier), same f64 baseline
 thread gets ≥ 2 blocks.
 
 Full before/after tables in
-[perf_comparison_with_old.md](perf_comparison_with_old.md);
+[perf_comparison_with_old.md](docs/perf_comparison_with_old.md);
 reproduction harness at [bench/bench_quad_vs_numpy.py](bench/bench_quad_vs_numpy.py).
 
 ### Added
@@ -84,14 +84,14 @@ reproduction harness at [bench/bench_quad_vs_numpy.py](bench/bench_quad_vs_numpy
 - **AVX-512 tier is built but never run on hardware in CI** — the bench
   host is Zen 3 (no AVX-512). The dispatcher selects it correctly on
   Sapphire Rapids / Zen 4, but those paths are uncovered. Tracking:
-  [performance_bottlenecks.md §3](performance_bottlenecks.md).
+  [performance_bottlenecks.md §3](docs/performance_bottlenecks.md).
 - **Single-thread quad-FMA throughput is capped at SLEEF's TD-FMA
   ceiling** (~60 cycles per FMA on Zen 3, ~800× the f64 cost). Not a
   blocker for 1.5; the optimisation plan to bring this to ~100× lives in
-  [performance_bottlenecks.md §1](performance_bottlenecks.md).
+  [performance_bottlenecks.md §1](docs/performance_bottlenecks.md).
 - **Level-2 `qger` / `qsymv` / `qtrsv` still drop through to a
   scalar+dispatched-axpy path** (qgemv is fully vectorised + threaded).
-  [performance_bottlenecks.md §4](performance_bottlenecks.md).
+  [performance_bottlenecks.md §4](docs/performance_bottlenecks.md).
 
 ### CI
 

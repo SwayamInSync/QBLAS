@@ -199,7 +199,7 @@ ctest                                  # correctness MUST stay green
 OMP_NUM_THREADS=16 ./bench/qblas_bench_compare \
     --benchmark_min_time=0.3s --benchmark_repetitions=3 \
     --benchmark_report_aggregates_only=true
-# Compare against perf_comparison_with_old.md numbers.
+# Compare against perf_comparison_with_old.md numbers (in this docs/ dir).
 ```
 
 Single change at a time.  Keep the bench harness untouched.
