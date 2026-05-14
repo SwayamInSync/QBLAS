@@ -332,7 +332,7 @@ void qblas_dispatch_init(void) {
 __attribute__((constructor))
 static void qblas_lib_init(void) { qblas_dispatch_init(); }
 
-const char *qblas_get_version(void) { return "QBLAS 0.1.0"; }
+const char *qblas_get_version(void) { return "QBLAS 1.5.0"; }
 
 void *qblas_aligned_alloc(size_t bytes) {
     size_t rounded = (bytes + QBLAS_ALIGN - 1) & ~(size_t)(QBLAS_ALIGN - 1);

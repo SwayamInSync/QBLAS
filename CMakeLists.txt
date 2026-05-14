@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(qblas
-    VERSION 0.1.0
+    VERSION 1.5.0
     LANGUAGES C CXX
     DESCRIPTION "BLAS for IEEE-754 binary128 on top of SLEEF")
 
