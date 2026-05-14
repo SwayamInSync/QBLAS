@@ -1,1 +1,16 @@
 build/
+build-*/
+.sleef-prefix/
+.cache/
+compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.pyc
+__pycache__/
+.DS_Store
+.vscode/
+Testing/
+upstream-project/

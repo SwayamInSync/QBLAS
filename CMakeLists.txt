@@ -1,149 +1,101 @@
-cmake_minimum_required(VERSION 3.15)
-project(QuadBLAS)
+cmake_minimum_required(VERSION 3.16)
+project(qblas
+    VERSION 1.5.0
+    LANGUAGES C CXX
+    DESCRIPTION "BLAS for IEEE-754 binary128 on top of SLEEF")
 
-# Set build type to Release if not specified
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+option(QBLAS_BUILD_TESTS    "Build correctness tests"      ON)
+option(QBLAS_BUILD_BENCH    "Build Google Benchmark suite" ON)
+option(QBLAS_BUILD_SHARED   "Build shared library"         ON)
+option(QBLAS_USE_OPENMP     "Enable OpenMP threading"      ON)
+option(QBLAS_NATIVE         "Tune top-level code for the host CPU" OFF)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
-
-# Set C++ standard globally
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
-# Find OpenMP (your existing code)
-if(APPLE)
-    find_library(OpenMP_LIBRARY
-        NAMES omp gomp iomp5
-        PATHS /opt/homebrew/lib /usr/local/lib /opt/homebrew/opt/libomp/lib
-        NO_DEFAULT_PATH
-    )
-    find_path(OpenMP_INCLUDE_DIR
-        NAMES omp.h
-        PATHS /opt/homebrew/include /usr/local/include /opt/homebrew/opt/libomp/include
-        NO_DEFAULT_PATH
-    )
-    
-    if(OpenMP_LIBRARY AND OpenMP_INCLUDE_DIR)
-        set(OpenMP_FOUND TRUE)
-        add_library(OpenMP::OpenMP_CXX UNKNOWN IMPORTED)
-        set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
-            IMPORTED_LOCATION "${OpenMP_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OpenMP_INCLUDE_DIR}"
-            INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
-        )
-        message(STATUS "Found OpenMP: ${OpenMP_LIBRARY}")
-    else()
-        set(OpenMP_FOUND FALSE)
-        message(WARNING "OpenMP not found. Install with: brew install libomp")
-    endif()
-else()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+include(CheckCSourceCompiles)
+include(CheckCCompilerFlag)
+include(QBLASArch)
+qblas_detect_arch()
+message(STATUS "QBLAS target arch: ${QBLAS_ARCH}")
+message(STATUS "QBLAS ISA tiers: ${QBLAS_ISA_TIERS}")
+
+# SLEEF: SLEEF_ROOT env var > .sleef-prefix > system pkg-config.
+if(DEFINED ENV{SLEEF_ROOT} AND NOT SLEEF_ROOT)
+    set(SLEEF_ROOT "$ENV{SLEEF_ROOT}")
+endif()
+if(NOT SLEEF_ROOT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.sleef-prefix/include/sleefquad.h")
+    set(SLEEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.sleef-prefix")
+endif()
+
+find_path(SLEEF_INCLUDE_DIR sleefquad.h
+    HINTS "${SLEEF_ROOT}/include" /usr/local/include /usr/include)
+find_library(SLEEF_LIBRARY      NAMES sleef     HINTS "${SLEEF_ROOT}/lib" /usr/local/lib /usr/lib)
+find_library(SLEEFQUAD_LIBRARY  NAMES sleefquad HINTS "${SLEEF_ROOT}/lib" /usr/local/lib /usr/lib)
+
+if(NOT SLEEF_INCLUDE_DIR OR NOT SLEEF_LIBRARY OR NOT SLEEFQUAD_LIBRARY)
+    message(FATAL_ERROR
+        "SLEEF (with quad support) not found. "
+        "Set SLEEF_ROOT or run scripts/bootstrap_sleef.sh.")
+endif()
+message(STATUS "SLEEF: ${SLEEFQUAD_LIBRARY}")
+
+find_library(TLFLOAT_LIBRARY NAMES tlfloat HINTS "${SLEEF_ROOT}/lib" /usr/local/lib /usr/lib)
+
+add_library(qblas::sleef INTERFACE IMPORTED)
+target_include_directories(qblas::sleef INTERFACE "${SLEEF_INCLUDE_DIR}")
+target_link_libraries(qblas::sleef INTERFACE "${SLEEFQUAD_LIBRARY}" "${SLEEF_LIBRARY}")
+if(TLFLOAT_LIBRARY)
+    target_link_libraries(qblas::sleef INTERFACE "${TLFLOAT_LIBRARY}")
+endif()
+
+# Use DT_RPATH (not DT_RUNPATH) on glibc so libsleefquad's NEEDED libtlfloat
+# resolves through the executable's rpath.
+set(CMAKE_INSTALL_RPATH "${SLEEF_ROOT}/lib")
+set(CMAKE_BUILD_RPATH   "${SLEEF_ROOT}/lib")
+set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
+if((CMAKE_C_COMPILER_ID MATCHES "GNU|Clang") AND NOT APPLE)
+    add_link_options(-Wl,--disable-new-dtags)
+endif()
+
+if(QBLAS_USE_OPENMP)
     find_package(OpenMP)
-endif()
-
-# Handle SLEEF library (fixed for your environment)
-set(SLEEF_CUSTOM_ROOT "$ENV{SLEEF_ROOT}")
-if(SLEEF_CUSTOM_ROOT)
-    set(SLEEF_INCLUDE_DIR "${SLEEF_CUSTOM_ROOT}/include")
-    set(SLEEF_LIB_DIR "${SLEEF_CUSTOM_ROOT}/lib")
-    if(NOT EXISTS ${SLEEF_INCLUDE_DIR} OR NOT EXISTS ${SLEEF_LIB_DIR})
-        message(FATAL_ERROR "SLEEF installation not found at: ${SLEEF_CUSTOM_ROOT}")
-    endif()
-    
-    find_library(SLEEF_LIBRARY 
-        NAMES sleef
-        PATHS ${SLEEF_LIB_DIR}
-        NO_DEFAULT_PATH
-    )
-    find_library(SLEEFQUAD_LIBRARY 
-        NAMES sleefquad
-        PATHS ${SLEEF_LIB_DIR}
-        NO_DEFAULT_PATH
-    )
-    
-    if(SLEEF_LIBRARY AND SLEEFQUAD_LIBRARY)
-        set(SLEEF_LIBRARIES ${SLEEF_LIBRARY} ${SLEEFQUAD_LIBRARY})
-        message(STATUS "Using SLEEF from: ${SLEEF_CUSTOM_ROOT}")
-        message(STATUS "Found SLEEF libraries: ${SLEEF_LIBRARIES}")
+    if(OpenMP_C_FOUND)
+        message(STATUS "OpenMP: enabled (${OpenMP_C_VERSION})")
     else()
-        message(FATAL_ERROR "SLEEF libraries not found in ${SLEEF_LIB_DIR}")
+        message(WARNING "OpenMP not found - building single-threaded")
+        set(QBLAS_USE_OPENMP OFF)
     endif()
-else()
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SLEEF REQUIRED sleef)
 endif()
 
-# Add Google Benchmark with proper Release configuration
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/benchmark/CMakeLists.txt")
-    # Configure Google Benchmark for Release mode and disable testing
-    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Enable testing of the benchmark library.")
-    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "Enable Google Test in benchmark.")
-    set(BENCHMARK_DOWNLOAD_DEPENDENCIES ON CACHE BOOL "Allow benchmark to download dependencies.")
-    
-    # Ensure benchmark is built in Release mode
-    set(CMAKE_BUILD_TYPE_BACKUP ${CMAKE_BUILD_TYPE})
-    set(CMAKE_BUILD_TYPE Release)
-    
-    add_subdirectory(third_party/benchmark)
-    
-    # Restore original build type
-    set(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE_BACKUP})
-    
-    set(GOOGLE_BENCHMARK_AVAILABLE TRUE)
-    message(STATUS "Google Benchmark added (Release mode)")
-else()
-    set(GOOGLE_BENCHMARK_AVAILABLE FALSE)
-    message(STATUS "Google Benchmark not found (run: git submodule add https://github.com/google/benchmark.git third_party/benchmark)")
+add_subdirectory(src)
+
+if(QBLAS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
 
-# Create executables
-add_executable(quadblas_test test_quadblas.cpp)
-add_executable(quadblas_benchmark_legacy benchmarks/legacy_benchmark.cpp)
-
-# Add Google Benchmark executable if available
-if(GOOGLE_BENCHMARK_AVAILABLE)
-    add_executable(quadblas_benchmark benchmarks/benchmark.cpp)
+if(QBLAS_BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
 
-# Common configuration function
-function(configure_target target_name)
-    target_compile_features(${target_name} PRIVATE cxx_std_17)
-    
-    # Set optimization flags based on build type
-    target_compile_options(${target_name} PRIVATE 
-        $<$<CONFIG:Release>:-O3 -march=native -ffast-math -DNDEBUG>
-        $<$<CONFIG:Debug>:-g -O0 -fsanitize=address>
-        $<$<CONFIG:RelWithDebInfo>:-O2 -g -march=native -ffast-math>
-    )
-    
-    target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    
-    if(SLEEF_CUSTOM_ROOT)
-        target_include_directories(${target_name} PRIVATE ${SLEEF_INCLUDE_DIR})
-    else()
-        target_include_directories(${target_name} PRIVATE ${SLEEF_INCLUDE_DIRS})
-        target_link_directories(${target_name} PRIVATE ${SLEEF_LIBRARY_DIRS})
-        target_compile_definitions(${target_name} PRIVATE ${SLEEF_CFLAGS_OTHER})
-    endif()
-    
-    target_link_libraries(${target_name} 
-        ${SLEEF_LIBRARIES}
-        $<$<BOOL:${OpenMP_FOUND}>:OpenMP::OpenMP_CXX>
-        $<$<CONFIG:Debug>:-fsanitize=address>
-    )
-endfunction()
-
-# Configure targets
-configure_target(quadblas_test)
-configure_target(quadblas_benchmark_legacy)
-
-# Configure Google Benchmark target with proper linking
-if(GOOGLE_BENCHMARK_AVAILABLE)
-    configure_target(quadblas_benchmark)
-    target_link_libraries(quadblas_benchmark benchmark::benchmark)
-endif()
-
-message(STATUS "=== Configuration ===")
-message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "OpenMP: ${OpenMP_FOUND}")
-message(STATUS "SLEEF: ${SLEEF_LIBRARIES}")
-message(STATUS "Google Benchmark: ${GOOGLE_BENCHMARK_AVAILABLE}")
+message(STATUS "")
+message(STATUS "=== QBLAS configuration ===")
+message(STATUS "  Build type      : ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Arch / ISAs     : ${QBLAS_ARCH} / ${QBLAS_ISA_TIERS}")
+message(STATUS "  OpenMP          : ${QBLAS_USE_OPENMP}")
+message(STATUS "  Tests           : ${QBLAS_BUILD_TESTS}")
+message(STATUS "  Benchmarks      : ${QBLAS_BUILD_BENCH}")
+message(STATUS "  SLEEF root      : ${SLEEF_ROOT}")
+message(STATUS "")
