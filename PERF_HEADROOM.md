@@ -82,9 +82,14 @@ There's a strong chance of small bugs in the q=8 width branch.
 SLEEF's q8 fma is fully 2-way wider than q4. Realistically expect 1.4–
 1.7×.
 
-**Why we didn't do it.**  We don't have AVX-512 hardware in the bench
-loop.  Building works (clang/gcc with `-mavx512f`), but the runtime
-dispatch on this Zen 3 always picks AVX2.
+**Why we didn't do it.**  The bench host is an AMD EPYC 7V13 (Zen 3 /
+Milan).  Confirmed via `/proc/cpuinfo` flags: `avx avx2 fma bmi1 bmi2
+vaes vpclmulqdq` are all present, but **no `avx512*` flag**.  Zen 3
+does not implement AVX-512 (added in Zen 4 / EPYC Genoa).  So the
+binary contains the AVX-512 tier but the runtime dispatcher correctly
+selects AVX2 from CPUID leaf 7.  We've also added a guard so an
+explicit `QBLAS_DISPATCH=avx512` on a non-AVX-512 host emits a stderr
+warning and falls back to the auto-detected tier instead of SIGILL.
 
 **Decision needed.**  Run on an AVX-512 host.  Two paths:
 - Spin up a Sapphire Rapids VM in Azure for one CI run.
@@ -147,8 +152,21 @@ costing 1.5–2× on the affected accesses.
 **What it would unlock.**  ~1.3–1.5× on dual-socket GEMM, maybe more on
 multi-thread Level 1 with large arrays.
 
-**Why we didn't do it.**  The current bench machine has all 96 cores in
-one logical view; we haven't seen multi-socket behavior.
+**Why we didn't do it.**  Implementation cost vs uncertainty about how
+much this actually helps on the bench machine.
+
+**Bench machine NUMA topology (verified):** EPYC 7V13 is a 2-socket box
+with 4 NUMA nodes:
+- node 0: cores 0-23
+- node 1: cores 24-47
+- node 2: cores 48-71
+- node 3: cores 72-95
+- L3 cache 32 MB per CCX × 12 CCXes = 384 MB total
+With `OMP_PROC_BIND=close` we keep threads on the launch node, but
+panel buffers allocated inside the parallel region first-touch on the
+calling thread's node, which can be wrong for cross-node fetchers.
+NUMA-aware allocation (libnuma + `numa_alloc_onnode`, or pre-allocated
+per-thread arenas) is the right fix.
 
 **Decision needed.**  Implement when the issue first surfaces on a real
 2P box.  `numa_alloc_onnode` + libnuma dependency.

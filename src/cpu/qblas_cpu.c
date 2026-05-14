@@ -317,24 +317,58 @@ void qblas_dispatch_init(void) {
     if (g_tier >= QBLAS_TIER_AVX512) qblas_register_avx512();
 #endif
 
-    /* Honour env override: QBLAS_DISPATCH=generic|sse2|avx2|avx512|neon */
+    /* Honour env override: QBLAS_DISPATCH=generic|sse2|avx2|avx512|neon.
+     * Only allow tiers the actual CPU supports — otherwise we'd register
+     * (say) AVX-512 kernels on a Zen 3 box and SIGILL on the first FMA.
+     * The auto-detected `g_tier` from CPUID is the ceiling. */
+    qblas_cpu_tier_t auto_tier = g_tier;
     const char *env = getenv("QBLAS_DISPATCH");
     if (env) {
-        qblas_register_generic();
-        if (0) {}
+        qblas_cpu_tier_t want = (qblas_cpu_tier_t)(-1);
+        if      (strcmp(env, "generic") == 0) want = QBLAS_TIER_GENERIC;
+        else if (strcmp(env, "sse2")    == 0) want = QBLAS_TIER_SSE2;
+        else if (strcmp(env, "neon")    == 0) want = QBLAS_TIER_NEON;
+        else if (strcmp(env, "avx2")    == 0) want = QBLAS_TIER_AVX2;
+        else if (strcmp(env, "avx512")  == 0) want = QBLAS_TIER_AVX512;
+
+        if ((int)want >= 0 && (int)want > (int)auto_tier) {
+            /* Print warning using a local string lookup; do NOT call
+             * qblas_get_dispatch_tier() here — it would recurse back into
+             * qblas_dispatch_init via the lazy-init check. */
+            const char *auto_name;
+            switch (auto_tier) {
+            case QBLAS_TIER_AVX512: auto_name = "avx512"; break;
+            case QBLAS_TIER_AVX2:   auto_name = "avx2";   break;
+            case QBLAS_TIER_NEON:   auto_name = "neon";   break;
+            case QBLAS_TIER_SSE2:   auto_name = "sse2";   break;
+            default:                auto_name = "generic"; break;
+            }
+            fprintf(stderr,
+                "qblas: QBLAS_DISPATCH=%s is higher than the CPU's detected "
+                "tier (%s); ignoring.\n",
+                env, auto_name);
+            want = (qblas_cpu_tier_t)(-1);
+        }
+
+        if ((int)want >= 0) {
+            qblas_register_generic();
+            switch (want) {
+            case QBLAS_TIER_GENERIC: g_tier = QBLAS_TIER_GENERIC; break;
 #ifdef QBLAS_HAS_SSE2
-        else if (strcmp(env, "sse2") == 0)   { qblas_register_sse2();   g_tier = QBLAS_TIER_SSE2;   }
+            case QBLAS_TIER_SSE2:    qblas_register_sse2();   g_tier = QBLAS_TIER_SSE2;   break;
 #endif
 #ifdef QBLAS_HAS_NEON
-        else if (strcmp(env, "neon") == 0)   { qblas_register_neon();   g_tier = QBLAS_TIER_NEON;   }
+            case QBLAS_TIER_NEON:    qblas_register_neon();   g_tier = QBLAS_TIER_NEON;   break;
 #endif
 #ifdef QBLAS_HAS_AVX2
-        else if (strcmp(env, "avx2") == 0)   { qblas_register_avx2();   g_tier = QBLAS_TIER_AVX2;   }
+            case QBLAS_TIER_AVX2:    qblas_register_avx2();   g_tier = QBLAS_TIER_AVX2;   break;
 #endif
 #ifdef QBLAS_HAS_AVX512
-        else if (strcmp(env, "avx512") == 0) { qblas_register_avx512(); g_tier = QBLAS_TIER_AVX512; }
+            case QBLAS_TIER_AVX512:  qblas_register_avx512(); g_tier = QBLAS_TIER_AVX512; break;
 #endif
-        else if (strcmp(env, "generic") == 0) { g_tier = QBLAS_TIER_GENERIC; }
+            default: break;
+            }
+        }
     }
 
     g_initialized = 1;
