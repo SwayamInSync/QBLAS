@@ -284,17 +284,6 @@ scripts/                bootstrap_sleef.sh.
 third_party/            sleef, benchmark, OpenBLAS (for reference) submodules.
 ```
 
-## Continuous integration
-
-The `.github/workflows/ci.yml` workflow runs on every push and pull request:
-
-- Ubuntu (gcc and clang) and macOS (clang).
-- Builds SLEEF via `scripts/bootstrap_sleef.sh`.
-- Builds qblas and runs `ctest`.
-- Smoke-runs the benchmark.
-- On Linux only, re-runs the test suite under each forced dispatch tier (generic / sse2 / avx2) to verify they all give the same results.
-- A separate `bench-baseline` job runs the matched-size benchmark suite and uploads results as an artifact for tracking perf over time.
-
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
