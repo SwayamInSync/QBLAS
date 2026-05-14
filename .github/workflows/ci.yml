@@ -32,6 +32,10 @@ jobs:
             compiler: clang
             cc: clang
             cxx: clang++
+          - os: macos-15
+            compiler: clang
+            cc: clang
+            cxx: clang++
 
     steps:
       - uses: actions/checkout@v4
