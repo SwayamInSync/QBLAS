@@ -254,9 +254,9 @@ On AMD EPYC 7V13 (96 cores, AVX2 tier, OMP_NUM_THREADS=16, median of 3):
 | qtrmm   | 512 x 512  | 350.3                |
 | qtrsm   | 512 x 512  | 335.7                |
 
-For full before/after tables (including single-thread and 96-thread numbers), see [PERF_COMPARISON.md](PERF_COMPARISON.md).
+For full before/after tables (including single-thread and 96-thread numbers), see [perf_comparison_with_old.md](perf_comparison_with_old.md).
 
-For remaining performance opportunities not yet taken, see [PERF_HEADROOM.md](PERF_HEADROOM.md).
+For remaining performance opportunities not yet taken, see [performance_bottlenecks.md](performance_bottlenecks.md).
 
 ## Repository layout
 
