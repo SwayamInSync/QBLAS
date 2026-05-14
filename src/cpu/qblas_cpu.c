@@ -4,6 +4,13 @@
 #ifndef _POSIX_C_SOURCE
 #  define _POSIX_C_SOURCE 200809L
 #endif
+/* macOS hides _SC_NPROCESSORS_ONLN behind _DARWIN_C_SOURCE when
+ * _POSIX_C_SOURCE is defined (it is a BSD extension, not in POSIX). */
+#ifdef __APPLE__
+#  ifndef _DARWIN_C_SOURCE
+#    define _DARWIN_C_SOURCE 1
+#  endif
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,8 +133,12 @@ static void detect_caches(qblas_tune_t *t) {
     v = sysconf(_SC_LEVEL3_CACHE_SIZE); if (v > 0) t->l3 = (size_t)v;
 #  endif
 #endif
+#ifdef _SC_NPROCESSORS_ONLN
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
     t->cores = (ncpu > 0) ? (int)ncpu : 1;
+#else
+    t->cores = 1;
+#endif
 }
 
 #ifdef _OPENMP
